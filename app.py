@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, jsonify, session
+from flask import Flask, render_template, request, jsonify, session, Response
 import subprocess
 import tempfile
 import os
@@ -6,7 +6,7 @@ import json
 import uuid
 import markdown
 from dotenv import load_dotenv
-from llm import chat as llm_chat, complete as llm_complete
+from llm import chat as llm_chat, complete as llm_complete, chat_stream as llm_chat_stream
 
 # Load .env file for local development (Render sets env vars directly)
 load_dotenv()
@@ -156,8 +156,11 @@ def chat(problem_id):
     
     chat_history = session[chat_key]
     
+    # Get submission history for context
+    submissions = session.get('submissions', {}).get(problem_id, [])
+    
     # Call LLM
-    result = llm_chat(problem, current_code, user_message, chat_history)
+    result = llm_chat(problem, current_code, user_message, chat_history, submissions)
     
     if result['error']:
         return jsonify({'error': result['error']}), 500
@@ -184,6 +187,64 @@ def clear_chat(problem_id):
     chat_key = f'chat_history_{problem_id}'
     session[chat_key] = []
     session.modified = True
+    return jsonify({'success': True})
+
+@app.route('/chat/stream/<problem_id>', methods=['POST'])
+def chat_stream(problem_id):
+    """Streaming chat endpoint for LLM assistance."""
+    problems = load_problems()
+    problem = next((p for p in problems if p['id'] == problem_id), None)
+    if not problem:
+        return jsonify({'error': 'Problem not found'}), 404
+    
+    data = request.json
+    user_message = data.get('message', '')
+    current_code = data.get('code', '')
+    
+    if not user_message:
+        return jsonify({'error': 'Message is required'}), 400
+    
+    # Get chat history from session
+    chat_key = f'chat_history_{problem_id}'
+    if chat_key not in session:
+        session[chat_key] = []
+    
+    chat_history = session[chat_key]
+    submissions = session.get('submissions', {}).get(problem_id, [])
+    
+    def generate():
+        full_response = []
+        for chunk in llm_chat_stream(problem, current_code, user_message, chat_history, submissions):
+            full_response.append(chunk)
+            yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+        
+        # Signal end of stream
+        yield f"data: {json.dumps({'done': True, 'full_response': ''.join(full_response)})}\n\n"
+    
+    # Update chat history after streaming (we'll do this client-side via a separate call)
+    return Response(generate(), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no'
+    })
+
+@app.route('/chat/save/<problem_id>', methods=['POST'])
+def save_chat(problem_id):
+    """Save a completed chat exchange to history."""
+    data = request.json
+    user_message = data.get('user_message', '')
+    assistant_response = data.get('assistant_response', '')
+    
+    if not user_message or not assistant_response:
+        return jsonify({'error': 'Both messages required'}), 400
+    
+    chat_key = f'chat_history_{problem_id}'
+    if chat_key not in session:
+        session[chat_key] = []
+    
+    session[chat_key].append({'role': 'user', 'content': user_message})
+    session[chat_key].append({'role': 'model', 'content': assistant_response})
+    session.modified = True
+    
     return jsonify({'success': True})
 
 @app.route('/complete/<problem_id>', methods=['POST'])

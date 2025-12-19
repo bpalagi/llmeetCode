@@ -15,8 +15,10 @@ def get_client():
         client = genai.Client(api_key=api_key)
     return client
 
-def build_system_prompt(problem, current_code):
+def build_system_prompt(problem, current_code, submissions=None):
     """Build the system prompt with problem context."""
+    submission_context = format_submissions(submissions) if submissions else "No submissions yet."
+    
     return f"""You are a helpful coding assistant helping a developer solve a programming problem.
 
 ## Problem: {problem['title']}
@@ -34,12 +36,16 @@ Priority: {problem['priority']}
 {current_code}
 ```
 
+## Submission History:
+{submission_context}
+
 ## Guidelines:
 - Help the user understand the problem and guide them toward a solution
 - Provide hints and explanations rather than complete solutions unless asked
 - If sharing code, use markdown code blocks
 - Be concise and focused on the coding task
 - If the user's code has bugs, help them identify and fix the issues
+- Reference their submission history when relevant (e.g., if tests are failing)
 """
 
 def format_test_cases(tests):
@@ -53,7 +59,28 @@ def format_test_cases(tests):
         lines.append(f"(+ {hidden_count} hidden tests)")
     return '\n'.join(lines)
 
-def chat(problem, current_code, user_message, chat_history=None):
+def format_submissions(submissions):
+    """Format submission history for the prompt."""
+    if not submissions:
+        return "No submissions yet."
+    
+    lines = []
+    for i, sub in enumerate(submissions, 1):
+        passed_count = sum(1 for r in sub.get('results', []) if r.get('passed'))
+        total_count = len(sub.get('results', []))
+        status = "✓ All passed" if sub.get('passed') else f"✗ {passed_count}/{total_count} passed"
+        lines.append(f"Submission #{i}: {status}")
+        
+        # Include failure details for the most recent submission
+        if i == len(submissions) and not sub.get('passed'):
+            for j, result in enumerate(sub.get('results', []), 1):
+                if not result.get('passed'):
+                    msg = result.get('message', 'Failed')
+                    lines.append(f"  - Test {j}: {msg}")
+    
+    return '\n'.join(lines)
+
+def chat(problem, current_code, user_message, chat_history=None, submissions=None):
     """Send a chat message and get a response from Gemini.
     
     Args:
@@ -61,6 +88,7 @@ def chat(problem, current_code, user_message, chat_history=None):
         current_code: The user's current code in the editor
         user_message: The user's chat message
         chat_history: List of previous messages [{"role": "user"|"model", "content": "..."}]
+        submissions: List of submission results for context
     
     Returns:
         dict with 'response' (str) and 'error' (str or None)
@@ -69,7 +97,7 @@ def chat(problem, current_code, user_message, chat_history=None):
         gemini_client = get_client()
         
         # Build the conversation contents
-        system_prompt = build_system_prompt(problem, current_code)
+        system_prompt = build_system_prompt(problem, current_code, submissions)
         
         # Build contents array for the API
         contents = []
@@ -114,6 +142,57 @@ def chat(problem, current_code, user_message, chat_history=None):
             "response": None,
             "error": str(e)
         }
+
+def chat_stream(problem, current_code, user_message, chat_history=None, submissions=None):
+    """Stream a chat response from Gemini.
+    
+    Yields chunks of the response text as they arrive.
+    """
+    try:
+        gemini_client = get_client()
+        
+        # Build the conversation contents
+        system_prompt = build_system_prompt(problem, current_code, submissions)
+        
+        # Build contents array for the API
+        contents = []
+        
+        # Add system context as first user message
+        contents.append({
+            "role": "user",
+            "parts": [{"text": system_prompt + "\n\nPlease acknowledge you understand the problem context."}]
+        })
+        contents.append({
+            "role": "model", 
+            "parts": [{"text": "I understand the problem. I'm ready to help you work through it. What would you like to discuss?"}]
+        })
+        
+        # Add chat history
+        if chat_history:
+            for msg in chat_history:
+                contents.append({
+                    "role": msg["role"],
+                    "parts": [{"text": msg["content"]}]
+                })
+        
+        # Add current user message
+        contents.append({
+            "role": "user",
+            "parts": [{"text": user_message}]
+        })
+        
+        # Call Gemini API with streaming
+        response = gemini_client.models.generate_content_stream(
+            model="gemini-2.5-flash",
+            contents=contents
+        )
+        
+        for chunk in response:
+            if chunk.text:
+                yield chunk.text
+                
+    except Exception as e:
+        yield f"[ERROR] {str(e)}"
 
 def complete(problem, code_before_cursor, code_after_cursor):
     """Generate code completion suggestions.

@@ -104,6 +104,28 @@
         padding: 16px;
         border-top: 1px solid #374151;
     }
+    .quick-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 8px 16px;
+        border-top: 1px solid #374151;
+    }
+    .quick-action-btn {
+        background: #374151;
+        color: #d1d5db;
+        border: 1px solid #4b5563;
+        border-radius: 16px;
+        padding: 4px 12px;
+        font-size: 0.75rem;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .quick-action-btn:hover {
+        background: #4b5563;
+        border-color: #6b7280;
+        color: white;
+    }
     .chat-input-wrapper {
         display: flex;
         gap: 8px;
@@ -153,6 +175,14 @@
         30% { transform: translateY(-4px); }
     }
     
+    .streaming-cursor {
+        animation: blink 1s infinite;
+        color: #8b5cf6;
+    }
+    @keyframes blink {
+        0%, 50% { opacity: 1; }
+        51%, 100% { opacity: 0; }
+    }
     .markdown-content pre {
         background: #1f2937;
         padding: 1rem;
@@ -278,9 +308,15 @@
             Hi! I'm here to help you solve this problem. Ask me anything about the requirements, your approach, or if you're stuck on something.
         </div>
     </div>
+    <div class="quick-actions">
+        <button class="quick-action-btn" data-prompt="Explain this problem in simple terms">Explain problem</button>
+        <button class="quick-action-btn" data-prompt="Give me a hint without revealing the full solution">Give hint</button>
+        <button class="quick-action-btn" data-prompt="Review my current code and suggest improvements">Review code</button>
+        <button class="quick-action-btn" data-prompt="Why might my tests be failing? Analyze my approach.">Debug help</button>
+    </div>
     <div class="chat-input-area">
         <div class="chat-input-wrapper">
-            <textarea id="chat-input" class="chat-input" placeholder="Ask about the problem..." rows="1"></textarea>
+            <textarea id="chat-input" class="chat-input" placeholder="Ask about the problem... (Cmd/Ctrl+Shift+C to toggle)" rows="1"></textarea>
             <button id="chat-send" class="chat-send">Send</button>
         </div>
     </div>
@@ -288,10 +324,18 @@
 {% endblock %}
 
 {% block scripts %}
+<script id="problem-data" type="application/json">
+{
+    "id": {{ problem.id | tojson }},
+    "starterCode": {{ problem.starter_code | tojson }},
+    "submissionCount": {{ submissions|length }}
+}
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
 <script>
-    const problemId = "{{ problem.id }}";
-    const starterCode = {{ problem.starter_code | tojson }};
+    const problemData = JSON.parse(document.getElementById('problem-data').textContent);
+    const problemId = problemData.id;
+    const starterCode = problemData.starterCode;
     
     let editor;
     
@@ -317,81 +361,120 @@
             scrollBeyondLastLine: false,
             automaticLayout: true,
             padding: { top: 16, bottom: 16 },
-            inlineSuggest: { enabled: true }
+            inlineSuggest: { 
+                enabled: true,
+                mode: 'subwordSmart'
+            },
+            quickSuggestions: false,
+            suggestOnTriggerCharacters: false
         });
         
-        // Register completion item provider for AI-powered code completion (Ctrl+Space)
-        let isCompletionLoading = false;
+        // Ghost text inline completions with debouncing
+        let completionDebounceTimer = null;
+        let currentCompletionRequest = null;
+        let lastCompletionPosition = null;
+        const DEBOUNCE_DELAY = 400; // ms
         
-        monaco.languages.registerCompletionItemProvider('python', {
-            triggerCharacters: ['.', '(', ' ', '\n', ':', '='],
-            provideCompletionItems: async (model, position, context, token) => {
-                // Avoid duplicate requests
-                if (isCompletionLoading) {
-                    return { suggestions: [] };
+        monaco.languages.registerInlineCompletionsProvider('python', {
+            provideInlineCompletions: async (model, position, context, token) => {
+                // Clear any pending debounce timer
+                if (completionDebounceTimer) {
+                    clearTimeout(completionDebounceTimer);
+                    completionDebounceTimer = null;
                 }
                 
-                try {
-                    const fullText = model.getValue();
-                    const offset = model.getOffsetAt(position);
-                    const codeBefore = fullText.substring(0, offset);
-                    const codeAfter = fullText.substring(offset);
-                    
-                    // Skip if cursor is at start or just whitespace before
-                    if (codeBefore.trim().length < 3) {
-                        return { suggestions: [] };
-                    }
-                    
-                    isCompletionLoading = true;
-                    
-                    const response = await fetch(`/complete/${problemId}`, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            code_before: codeBefore,
-                            code_after: codeAfter
-                        })
-                    });
-                    
-                    isCompletionLoading = false;
-                    
-                    if (!response.ok) {
-                        return { suggestions: [] };
-                    }
-                    
-                    const data = await response.json();
-                    
-                    if (data.completion && data.completion.trim()) {
-                        // Get the word at cursor for replacement range
-                        const wordInfo = model.getWordUntilPosition(position);
-                        const range = {
-                            startLineNumber: position.lineNumber,
-                            startColumn: wordInfo.startColumn,
-                            endLineNumber: position.lineNumber,
-                            endColumn: position.column
-                        };
-                        
-                        return {
-                            suggestions: [{
-                                label: '✨ AI: ' + data.completion.split('\n')[0].substring(0, 40) + (data.completion.length > 40 ? '...' : ''),
-                                kind: monaco.languages.CompletionItemKind.Snippet,
-                                insertText: data.completion,
-                                insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
-                                range: range,
-                                detail: 'AI Completion',
-                                sortText: '0000', // Prioritize AI suggestions
-                                documentation: data.completion
-                            }]
-                        };
-                    }
-                    
-                    return { suggestions: [] };
-                } catch (error) {
-                    console.error('Completion error:', error);
-                    isCompletionLoading = false;
-                    return { suggestions: [] };
+                // Cancel previous request if still pending
+                if (currentCompletionRequest) {
+                    currentCompletionRequest.abort();
+                    currentCompletionRequest = null;
                 }
+                
+                const fullText = model.getValue();
+                const offset = model.getOffsetAt(position);
+                const codeBefore = fullText.substring(0, offset);
+                const codeAfter = fullText.substring(offset);
+                
+                // Skip if cursor is at start or just whitespace before
+                if (codeBefore.trim().length < 5) {
+                    return { items: [] };
+                }
+                
+                // Skip if inside a string or comment (basic check)
+                const currentLine = model.getLineContent(position.lineNumber);
+                const beforeCursor = currentLine.substring(0, position.column - 1);
+                const quoteCount = (beforeCursor.match(/["']/g) || []).length;
+                if (quoteCount % 2 !== 0) {
+                    return { items: [] }; // Inside a string
+                }
+                if (beforeCursor.trim().startsWith('#')) {
+                    return { items: [] }; // Inside a comment
+                }
+                
+                // Debounce: wait before making the request
+                return new Promise((resolve) => {
+                    completionDebounceTimer = setTimeout(async () => {
+                        // Check if cancelled
+                        if (token.isCancellationRequested) {
+                            resolve({ items: [] });
+                            return;
+                        }
+                        
+                        try {
+                            const controller = new AbortController();
+                            currentCompletionRequest = controller;
+                            
+                            const response = await fetch(`/complete/${problemId}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    code_before: codeBefore,
+                                    code_after: codeAfter
+                                }),
+                                signal: controller.signal
+                            });
+                            
+                            currentCompletionRequest = null;
+                            
+                            if (!response.ok || token.isCancellationRequested) {
+                                resolve({ items: [] });
+                                return;
+                            }
+                            
+                            const data = await response.json();
+                            
+                            if (data.completion && data.completion.trim()) {
+                                resolve({
+                                    items: [{
+                                        insertText: data.completion,
+                                        range: {
+                                            startLineNumber: position.lineNumber,
+                                            startColumn: position.column,
+                                            endLineNumber: position.lineNumber,
+                                            endColumn: position.column
+                                        }
+                                    }]
+                                });
+                            } else {
+                                resolve({ items: [] });
+                            }
+                        } catch (error) {
+                            if (error.name !== 'AbortError') {
+                                console.error('Completion error:', error);
+                            }
+                            currentCompletionRequest = null;
+                            resolve({ items: [] });
+                        }
+                    }, DEBOUNCE_DELAY);
+                });
+            },
+            freeInlineCompletions: (completions) => {
+                // Cleanup if needed
             }
+        });
+        
+        // Keyboard shortcut: Ctrl+Space to manually trigger inline suggestions
+        editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Space, () => {
+            editor.trigger('keyboard', 'editor.action.inlineSuggest.trigger', {});
         });
     });
     
@@ -453,7 +536,7 @@
         }
     });
     
-    let submissionCount = {{ submissions|length }};
+    let submissionCount = problemData.submissionCount;
     
     function updateHistory(passed, passCount, totalTests) {
         submissionCount++;
@@ -529,10 +612,18 @@
         chatSend.disabled = true;
         
         addMessage(message, 'user');
-        showTyping();
+        
+        // Create streaming message element
+        const streamDiv = document.createElement('div');
+        streamDiv.className = 'chat-message assistant';
+        streamDiv.innerHTML = '<span class="streaming-cursor">▊</span>';
+        chatMessages.appendChild(streamDiv);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        let fullResponse = '';
         
         try {
-            const response = await fetch(`/chat/${problemId}`, {
+            const response = await fetch(`/chat/stream/${problemId}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -541,17 +632,51 @@
                 })
             });
             
-            const data = await response.json();
-            hideTyping();
+            if (!response.ok) {
+                const errorData = await response.json();
+                streamDiv.innerHTML = formatMarkdown('Sorry, I encountered an error: ' + (errorData.error || 'Unknown error'));
+                return;
+            }
             
-            if (data.error) {
-                addMessage('Sorry, I encountered an error: ' + data.error, 'assistant');
-            } else {
-                addMessage(data.response, 'assistant');
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const text = decoder.decode(value);
+                const lines = text.split('\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            if (data.chunk) {
+                                fullResponse += data.chunk;
+                                streamDiv.innerHTML = formatMarkdown(fullResponse) + '<span class="streaming-cursor">▊</span>';
+                                chatMessages.scrollTop = chatMessages.scrollHeight;
+                            }
+                            if (data.done) {
+                                streamDiv.innerHTML = formatMarkdown(fullResponse);
+                                // Save to chat history
+                                await fetch(`/chat/save/${problemId}`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({
+                                        user_message: message,
+                                        assistant_response: fullResponse
+                                    })
+                                });
+                            }
+                        } catch (e) {
+                            // Skip invalid JSON
+                        }
+                    }
+                }
             }
         } catch (error) {
-            hideTyping();
-            addMessage('Sorry, I encountered an error: ' + error.message, 'assistant');
+            streamDiv.innerHTML = formatMarkdown('Sorry, I encountered an error: ' + error.message);
         } finally {
             chatSend.disabled = false;
             chatInput.focus();
@@ -599,5 +724,27 @@
     }
     
     loadChatHistory();
+    
+    // Quick action buttons
+    document.querySelectorAll('.quick-action-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const prompt = btn.dataset.prompt;
+            if (prompt) {
+                chatInput.value = prompt;
+                sendMessage();
+            }
+        });
+    });
+    
+    // Keyboard shortcut: Cmd/Ctrl + Shift + C to toggle chat
+    document.addEventListener('keydown', (e) => {
+        if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'c') {
+            e.preventDefault();
+            toggleChat();
+            if (chatPanel.classList.contains('open')) {
+                chatInput.focus();
+            }
+        }
+    });
 </script>
 {% endblock %}

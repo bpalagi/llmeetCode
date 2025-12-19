@@ -320,71 +320,78 @@
             inlineSuggest: { enabled: true }
         });
         
-        // Register inline completion provider for AI-powered code completion
-        let completionTimeout = null;
-        let currentCompletion = null;
+        // Register completion item provider for AI-powered code completion (Ctrl+Space)
+        let isCompletionLoading = false;
         
-        monaco.languages.registerInlineCompletionsProvider('python', {
-            provideInlineCompletions: async (model, position, context, token) => {
-                // Debounce: wait for user to stop typing
-                if (completionTimeout) {
-                    clearTimeout(completionTimeout);
+        monaco.languages.registerCompletionItemProvider('python', {
+            triggerCharacters: ['.', '(', ' ', '\n', ':', '='],
+            provideCompletionItems: async (model, position, context, token) => {
+                // Avoid duplicate requests
+                if (isCompletionLoading) {
+                    return { suggestions: [] };
                 }
                 
-                return new Promise((resolve) => {
-                    completionTimeout = setTimeout(async () => {
-                        try {
-                            const fullText = model.getValue();
-                            const offset = model.getOffsetAt(position);
-                            const codeBefore = fullText.substring(0, offset);
-                            const codeAfter = fullText.substring(offset);
-                            
-                            // Skip if cursor is at start or just whitespace before
-                            if (codeBefore.trim().length < 3) {
-                                resolve({ items: [] });
-                                return;
-                            }
-                            
-                            const response = await fetch(`/complete/${problemId}`, {
-                                method: 'POST',
-                                headers: { 'Content-Type': 'application/json' },
-                                body: JSON.stringify({
-                                    code_before: codeBefore,
-                                    code_after: codeAfter
-                                })
-                            });
-                            
-                            if (!response.ok) {
-                                resolve({ items: [] });
-                                return;
-                            }
-                            
-                            const data = await response.json();
-                            
-                            if (data.completion && data.completion.trim()) {
-                                currentCompletion = data.completion;
-                                resolve({
-                                    items: [{
-                                        insertText: data.completion,
-                                        range: {
-                                            startLineNumber: position.lineNumber,
-                                            startColumn: position.column,
-                                            endLineNumber: position.lineNumber,
-                                            endColumn: position.column
-                                        }
-                                    }]
-                                });
-                            } else {
-                                resolve({ items: [] });
-                            }
-                        } catch (error) {
-                            console.error('Completion error:', error);
-                            resolve({ items: [] });
-                        }
-                    }, 500); // 500ms debounce
-                });
-            },
-            freeInlineCompletions: () => {}
+                try {
+                    const fullText = model.getValue();
+                    const offset = model.getOffsetAt(position);
+                    const codeBefore = fullText.substring(0, offset);
+                    const codeAfter = fullText.substring(offset);
+                    
+                    // Skip if cursor is at start or just whitespace before
+                    if (codeBefore.trim().length < 3) {
+                        return { suggestions: [] };
+                    }
+                    
+                    isCompletionLoading = true;
+                    
+                    const response = await fetch(`/complete/${problemId}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            code_before: codeBefore,
+                            code_after: codeAfter
+                        })
+                    });
+                    
+                    isCompletionLoading = false;
+                    
+                    if (!response.ok) {
+                        return { suggestions: [] };
+                    }
+                    
+                    const data = await response.json();
+                    
+                    if (data.completion && data.completion.trim()) {
+                        // Get the word at cursor for replacement range
+                        const wordInfo = model.getWordUntilPosition(position);
+                        const range = {
+                            startLineNumber: position.lineNumber,
+                            startColumn: wordInfo.startColumn,
+                            endLineNumber: position.lineNumber,
+                            endColumn: position.column
+                        };
+                        
+                        return {
+                            suggestions: [{
+                                label: '✨ AI: ' + data.completion.split('\n')[0].substring(0, 40) + (data.completion.length > 40 ? '...' : ''),
+                                kind: monaco.languages.CompletionItemKind.Snippet,
+                                insertText: data.completion,
+                                insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
+                                range: range,
+                                detail: 'AI Completion',
+                                sortText: '0000', // Prioritize AI suggestions
+                                documentation: data.completion
+                            }]
+                        };
+                    }
+                    
+                    return { suggestions: [] };
+                } catch (error) {
+                    console.error('Completion error:', error);
+                    isCompletionLoading = false;
+                    return { suggestions: [] };
+                }
+            }
         });
     });
     

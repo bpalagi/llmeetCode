@@ -24,7 +24,13 @@ def challenge(problem_id):
     problem = next((p for p in problems if p['id'] == problem_id), None)
     if not problem:
         return "Problem not found", 404
-    return render_template('challenge.html', problem=problem)
+    submissions = session.get('submissions', {}).get(problem_id, [])
+    return render_template('challenge.html', problem=problem, submissions=submissions)
+
+@app.route('/history/<problem_id>')
+def history(problem_id):
+    submissions = session.get('submissions', {}).get(problem_id, [])
+    return jsonify(submissions)
 
 @app.route('/submit/<problem_id>', methods=['POST'])
 def submit(problem_id):

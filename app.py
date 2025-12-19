@@ -5,6 +5,11 @@ import os
 import json
 import uuid
 import markdown
+from dotenv import load_dotenv
+from llm import chat as llm_chat, complete as llm_complete
+
+# Load .env file for local development (Render sets env vars directly)
+load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
@@ -128,6 +133,79 @@ except Exception as e:
     finally:
         if 'temp_path' in locals():
             os.unlink(temp_path)
+
+@app.route('/chat/<problem_id>', methods=['POST'])
+def chat(problem_id):
+    """Chat endpoint for LLM assistance."""
+    problems = load_problems()
+    problem = next((p for p in problems if p['id'] == problem_id), None)
+    if not problem:
+        return jsonify({'error': 'Problem not found'}), 404
+    
+    data = request.json
+    user_message = data.get('message', '')
+    current_code = data.get('code', '')
+    
+    if not user_message:
+        return jsonify({'error': 'Message is required'}), 400
+    
+    # Get chat history from session
+    chat_key = f'chat_history_{problem_id}'
+    if chat_key not in session:
+        session[chat_key] = []
+    
+    chat_history = session[chat_key]
+    
+    # Call LLM
+    result = llm_chat(problem, current_code, user_message, chat_history)
+    
+    if result['error']:
+        return jsonify({'error': result['error']}), 500
+    
+    # Update chat history in session
+    session[chat_key].append({'role': 'user', 'content': user_message})
+    session[chat_key].append({'role': 'model', 'content': result['response']})
+    session.modified = True
+    
+    return jsonify({
+        'response': result['response'],
+        'history': session[chat_key]
+    })
+
+@app.route('/chat/history/<problem_id>')
+def chat_history(problem_id):
+    """Get chat history for a problem."""
+    chat_key = f'chat_history_{problem_id}'
+    return jsonify(session.get(chat_key, []))
+
+@app.route('/chat/clear/<problem_id>', methods=['POST'])
+def clear_chat(problem_id):
+    """Clear chat history for a problem."""
+    chat_key = f'chat_history_{problem_id}'
+    session[chat_key] = []
+    session.modified = True
+    return jsonify({'success': True})
+
+@app.route('/complete/<problem_id>', methods=['POST'])
+def complete(problem_id):
+    """Code completion endpoint."""
+    problems = load_problems()
+    problem = next((p for p in problems if p['id'] == problem_id), None)
+    if not problem:
+        return jsonify({'error': 'Problem not found'}), 404
+    
+    data = request.json
+    code_before = data.get('code_before', '')
+    code_after = data.get('code_after', '')
+    
+    result = llm_complete(problem, code_before, code_after)
+    
+    if result['error']:
+        return jsonify({'error': result['error']}), 500
+    
+    return jsonify({
+        'completion': result['completion']
+    })
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)

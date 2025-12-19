@@ -9,3 +9,5 @@ services:
         value: "3.11"
       - key: SECRET_KEY
         generateValue: true
+      - key: GEMINI_API_KEY
+        sync: false  # Set manually in Render dashboard

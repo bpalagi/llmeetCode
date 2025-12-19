@@ -18,6 +18,141 @@
     .test-pass { background: #166534; color: #86efac; }
     .test-fail { background: #991b1b; color: #fca5a5; }
     .test-hidden { opacity: 0.7; }
+    
+    /* Chat Panel Styles */
+    .chat-panel {
+        position: fixed;
+        right: 0;
+        top: 0;
+        height: 100vh;
+        width: 380px;
+        background: #1f2937;
+        border-left: 1px solid #374151;
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+        z-index: 50;
+        display: flex;
+        flex-direction: column;
+    }
+    .chat-panel.open { transform: translateX(0); }
+    .chat-toggle {
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        width: 56px;
+        height: 56px;
+        border-radius: 50%;
+        background: #8b5cf6;
+        color: white;
+        border: none;
+        cursor: pointer;
+        box-shadow: 0 4px 12px rgba(139, 92, 246, 0.4);
+        z-index: 49;
+        transition: all 0.2s;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .chat-toggle:hover { background: #7c3aed; transform: scale(1.05); }
+    .chat-toggle.open { right: 400px; }
+    .chat-header {
+        padding: 16px;
+        border-bottom: 1px solid #374151;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    .chat-messages {
+        flex: 1;
+        overflow-y: auto;
+        padding: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+    }
+    .chat-message {
+        max-width: 90%;
+        padding: 10px 14px;
+        border-radius: 12px;
+        font-size: 0.875rem;
+        line-height: 1.5;
+    }
+    .chat-message.user {
+        align-self: flex-end;
+        background: #8b5cf6;
+        color: white;
+        border-bottom-right-radius: 4px;
+    }
+    .chat-message.assistant {
+        align-self: flex-start;
+        background: #374151;
+        color: #e5e7eb;
+        border-bottom-left-radius: 4px;
+    }
+    .chat-message pre {
+        background: #111827;
+        padding: 8px;
+        border-radius: 6px;
+        overflow-x: auto;
+        margin: 8px 0;
+    }
+    .chat-message code {
+        font-family: 'Monaco', 'Menlo', monospace;
+        font-size: 0.8rem;
+    }
+    .chat-input-area {
+        padding: 16px;
+        border-top: 1px solid #374151;
+    }
+    .chat-input-wrapper {
+        display: flex;
+        gap: 8px;
+    }
+    .chat-input {
+        flex: 1;
+        background: #111827;
+        border: 1px solid #374151;
+        border-radius: 8px;
+        padding: 10px 14px;
+        color: white;
+        font-size: 0.875rem;
+        resize: none;
+    }
+    .chat-input:focus { outline: none; border-color: #8b5cf6; }
+    .chat-send {
+        background: #8b5cf6;
+        color: white;
+        border: none;
+        border-radius: 8px;
+        padding: 10px 16px;
+        cursor: pointer;
+        font-weight: 500;
+    }
+    .chat-send:hover { background: #7c3aed; }
+    .chat-send:disabled { opacity: 0.5; cursor: not-allowed; }
+    .chat-typing {
+        display: flex;
+        gap: 4px;
+        padding: 10px 14px;
+        background: #374151;
+        border-radius: 12px;
+        align-self: flex-start;
+        border-bottom-left-radius: 4px;
+    }
+    .chat-typing span {
+        width: 8px;
+        height: 8px;
+        background: #9ca3af;
+        border-radius: 50%;
+        animation: typing 1.4s infinite;
+    }
+    .chat-typing span:nth-child(2) { animation-delay: 0.2s; }
+    .chat-typing span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes typing {
+        0%, 60%, 100% { transform: translateY(0); }
+        30% { transform: translateY(-4px); }
+    }
+    
     .markdown-content pre {
         background: #1f2937;
         padding: 1rem;
@@ -121,6 +256,35 @@
         </div>
     </div>
 </div>
+
+<!-- Chat Toggle Button -->
+<button id="chat-toggle" class="chat-toggle" title="Chat with AI">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+    </svg>
+</button>
+
+<!-- Chat Panel -->
+<div id="chat-panel" class="chat-panel">
+    <div class="chat-header">
+        <div>
+            <h3 class="font-semibold text-white">AI Assistant</h3>
+            <p class="text-xs text-gray-400">Powered by Gemini</p>
+        </div>
+        <button id="clear-chat" class="text-xs text-gray-400 hover:text-white">Clear</button>
+    </div>
+    <div id="chat-messages" class="chat-messages">
+        <div class="chat-message assistant">
+            Hi! I'm here to help you solve this problem. Ask me anything about the requirements, your approach, or if you're stuck on something.
+        </div>
+    </div>
+    <div class="chat-input-area">
+        <div class="chat-input-wrapper">
+            <textarea id="chat-input" class="chat-input" placeholder="Ask about the problem..." rows="1"></textarea>
+            <button id="chat-send" class="chat-send">Send</button>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -152,7 +316,75 @@
             lineNumbers: 'on',
             scrollBeyondLastLine: false,
             automaticLayout: true,
-            padding: { top: 16, bottom: 16 }
+            padding: { top: 16, bottom: 16 },
+            inlineSuggest: { enabled: true }
+        });
+        
+        // Register inline completion provider for AI-powered code completion
+        let completionTimeout = null;
+        let currentCompletion = null;
+        
+        monaco.languages.registerInlineCompletionsProvider('python', {
+            provideInlineCompletions: async (model, position, context, token) => {
+                // Debounce: wait for user to stop typing
+                if (completionTimeout) {
+                    clearTimeout(completionTimeout);
+                }
+                
+                return new Promise((resolve) => {
+                    completionTimeout = setTimeout(async () => {
+                        try {
+                            const fullText = model.getValue();
+                            const offset = model.getOffsetAt(position);
+                            const codeBefore = fullText.substring(0, offset);
+                            const codeAfter = fullText.substring(offset);
+                            
+                            // Skip if cursor is at start or just whitespace before
+                            if (codeBefore.trim().length < 3) {
+                                resolve({ items: [] });
+                                return;
+                            }
+                            
+                            const response = await fetch(`/complete/${problemId}`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    code_before: codeBefore,
+                                    code_after: codeAfter
+                                })
+                            });
+                            
+                            if (!response.ok) {
+                                resolve({ items: [] });
+                                return;
+                            }
+                            
+                            const data = await response.json();
+                            
+                            if (data.completion && data.completion.trim()) {
+                                currentCompletion = data.completion;
+                                resolve({
+                                    items: [{
+                                        insertText: data.completion,
+                                        range: {
+                                            startLineNumber: position.lineNumber,
+                                            startColumn: position.column,
+                                            endLineNumber: position.lineNumber,
+                                            endColumn: position.column
+                                        }
+                                    }]
+                                });
+                            } else {
+                                resolve({ items: [] });
+                            }
+                        } catch (error) {
+                            console.error('Completion error:', error);
+                            resolve({ items: [] });
+                        }
+                    }, 500); // 500ms debounce
+                });
+            },
+            freeInlineCompletions: () => {}
         });
     });
     
@@ -236,5 +468,129 @@
         `;
         historyList.insertBefore(div, historyList.firstChild);
     }
+    
+    // Chat functionality
+    const chatToggle = document.getElementById('chat-toggle');
+    const chatPanel = document.getElementById('chat-panel');
+    const chatMessages = document.getElementById('chat-messages');
+    const chatInput = document.getElementById('chat-input');
+    const chatSend = document.getElementById('chat-send');
+    const clearChat = document.getElementById('clear-chat');
+    
+    function toggleChat() {
+        chatPanel.classList.toggle('open');
+        chatToggle.classList.toggle('open');
+    }
+    
+    chatToggle.addEventListener('click', toggleChat);
+    
+    function addMessage(content, role) {
+        const div = document.createElement('div');
+        div.className = `chat-message ${role === 'user' ? 'user' : 'assistant'}`;
+        div.innerHTML = formatMarkdown(content);
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    function formatMarkdown(text) {
+        // Basic markdown formatting for code blocks
+        return text
+            .replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\n/g, '<br>');
+    }
+    
+    function showTyping() {
+        const div = document.createElement('div');
+        div.className = 'chat-typing';
+        div.id = 'typing-indicator';
+        div.innerHTML = '<span></span><span></span><span></span>';
+        chatMessages.appendChild(div);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+    
+    function hideTyping() {
+        const typing = document.getElementById('typing-indicator');
+        if (typing) typing.remove();
+    }
+    
+    async function sendMessage() {
+        const message = chatInput.value.trim();
+        if (!message) return;
+        
+        chatInput.value = '';
+        chatSend.disabled = true;
+        
+        addMessage(message, 'user');
+        showTyping();
+        
+        try {
+            const response = await fetch(`/chat/${problemId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    code: editor.getValue()
+                })
+            });
+            
+            const data = await response.json();
+            hideTyping();
+            
+            if (data.error) {
+                addMessage('Sorry, I encountered an error: ' + data.error, 'assistant');
+            } else {
+                addMessage(data.response, 'assistant');
+            }
+        } catch (error) {
+            hideTyping();
+            addMessage('Sorry, I encountered an error: ' + error.message, 'assistant');
+        } finally {
+            chatSend.disabled = false;
+            chatInput.focus();
+        }
+    }
+    
+    chatSend.addEventListener('click', sendMessage);
+    chatInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+    
+    clearChat.addEventListener('click', async () => {
+        if (!confirm('Clear chat history?')) return;
+        
+        try {
+            await fetch(`/chat/clear/${problemId}`, { method: 'POST' });
+            chatMessages.innerHTML = `
+                <div class="chat-message assistant">
+                    Hi! I'm here to help you solve this problem. Ask me anything about the requirements, your approach, or if you're stuck on something.
+                </div>
+            `;
+        } catch (error) {
+            console.error('Failed to clear chat:', error);
+        }
+    });
+    
+    // Load chat history on page load
+    async function loadChatHistory() {
+        try {
+            const response = await fetch(`/chat/history/${problemId}`);
+            const history = await response.json();
+            
+            if (history.length > 0) {
+                chatMessages.innerHTML = '';
+                history.forEach(msg => {
+                    addMessage(msg.content, msg.role === 'user' ? 'user' : 'assistant');
+                });
+            }
+        } catch (error) {
+            console.error('Failed to load chat history:', error);
+        }
+    }
+    
+    loadChatHistory();
 </script>
 {% endblock %}

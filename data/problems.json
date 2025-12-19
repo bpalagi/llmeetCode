@@ -1,0 +1,49 @@
+[
+  {
+    "id": "refactor-user-validator",
+    "title": "TICKET-1042: Refactor User Validator",
+    "type": "Jira Ticket",
+    "priority": "Medium",
+    "reporter": "Sarah Chen",
+    "description": "The `validate_user` function in our auth module is getting unwieldy. It currently handles email validation, password strength checking, and username rules all in one giant function.\n\n**Acceptance Criteria:**\n- Split into separate helper functions\n- Maintain the same public interface (`validate_user(email, password, username)` returns `True`/`False`)\n- All existing tests must pass\n\n**Current Implementation:**\n```python\ndef validate_user(email, password, username):\n    # Email check\n    if '@' not in email or '.' not in email.split('@')[1]:\n        return False\n    # Password check  \n    if len(password) < 8 or not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):\n        return False\n    # Username check\n    if len(username) < 3 or len(username) > 20 or not username.isalnum():\n        return False\n    return True\n```",
+    "starter_code": "def validate_user(email, password, username):\n    # Email check\n    if '@' not in email or '.' not in email.split('@')[1]:\n        return False\n    # Password check  \n    if len(password) < 8 or not any(c.isupper() for c in password) or not any(c.isdigit() for c in password):\n        return False\n    # Username check\n    if len(username) < 3 or len(username) > 20 or not username.isalnum():\n        return False\n    return True",
+    "tests": [
+      {"input": "validate_user('test@example.com', 'Password123', 'johndoe')", "expected": "True", "hidden": false},
+      {"input": "validate_user('invalid-email', 'Password123', 'johndoe')", "expected": "False", "hidden": false},
+      {"input": "validate_user('test@example.com', 'weak', 'johndoe')", "expected": "False", "hidden": false},
+      {"input": "validate_user('test@example.com', 'Password123', 'ab')", "expected": "False", "hidden": true},
+      {"input": "validate_user('test@example.com', 'Password123', 'valid_user!')", "expected": "False", "hidden": true}
+    ]
+  },
+  {
+    "id": "fix-api-timeout",
+    "title": "SUPPORT-887: API Requests Timing Out",
+    "type": "Support Request",
+    "priority": "High",
+    "reporter": "Customer: Acme Corp",
+    "description": "**Customer Report:**\n> Our integration with your API started failing yesterday. We're getting timeout errors when fetching user data. The endpoint `/api/users/{id}` takes forever to respond.\n\n**Investigation Notes:**\nLooked at the code and found the issue is in the `get_user_with_posts` function. It's making N+1 queries - fetching the user, then fetching each post individually.\n\n**Your Task:**\nRefactor to fetch all posts in a single query. The function signature and return format must stay the same.\n\n**Current Implementation:**\n```python\ndef get_user_with_posts(user_id, db):\n    user = db.get_user(user_id)\n    posts = []\n    for post_id in user['post_ids']:\n        posts.append(db.get_post(post_id))\n    return {'user': user, 'posts': posts}\n```",
+    "starter_code": "def get_user_with_posts(user_id, db):\n    user = db.get_user(user_id)\n    posts = []\n    for post_id in user['post_ids']:\n        posts.append(db.get_post(post_id))\n    return {'user': user, 'posts': posts}",
+    "setup_code": "class MockDB:\n    def __init__(self):\n        self.query_count = 0\n    def get_user(self, user_id):\n        self.query_count += 1\n        return {'id': user_id, 'name': 'Test User', 'post_ids': [1, 2, 3]}\n    def get_post(self, post_id):\n        self.query_count += 1\n        return {'id': post_id, 'title': f'Post {post_id}'}\n    def get_posts_batch(self, post_ids):\n        self.query_count += 1\n        return [{'id': pid, 'title': f'Post {pid}'} for pid in post_ids]\n\ndb = MockDB()",
+    "tests": [
+      {"input": "(lambda: (get_user_with_posts(1, db), db.query_count <= 2)[1])()", "expected": "True", "hidden": false},
+      {"input": "get_user_with_posts(1, MockDB())['user']['id']", "expected": "1", "hidden": false},
+      {"input": "len(get_user_with_posts(1, MockDB())['posts'])", "expected": "3", "hidden": false},
+      {"input": "get_user_with_posts(1, MockDB())['posts'][0]['title']", "expected": "'Post 1'", "hidden": true}
+    ]
+  },
+  {
+    "id": "debug-cart-total",
+    "title": "BUG-2341: Shopping Cart Total Wrong",
+    "type": "Bug Report",
+    "priority": "Critical",
+    "reporter": "QA Team",
+    "description": "**Bug Description:**\nThe shopping cart is calculating totals incorrectly when discounts are applied. Customers are being overcharged.\n\n**Steps to Reproduce:**\n1. Add item worth $100 to cart\n2. Apply 20% discount code\n3. Expected total: $80\n4. Actual total: $100 (discount not applied)\n\n**Root Cause:**\nThe `calculate_total` function applies the discount but then overwrites it.\n\n**Your Task:**\nFix the bug. Do not change the function signature.",
+    "starter_code": "def calculate_total(items, discount_percent=0):\n    total = 0\n    for item in items:\n        total += item['price'] * item['quantity']\n    \n    if discount_percent > 0:\n        discount = total * (discount_percent / 100)\n        total = total - discount\n    \n    total = sum(item['price'] * item['quantity'] for item in items)\n    return round(total, 2)",
+    "tests": [
+      {"input": "calculate_total([{'price': 100, 'quantity': 1}], 20)", "expected": "80.0", "hidden": false},
+      {"input": "calculate_total([{'price': 50, 'quantity': 2}], 10)", "expected": "90.0", "hidden": false},
+      {"input": "calculate_total([{'price': 25, 'quantity': 4}], 0)", "expected": "100.0", "hidden": false},
+      {"input": "calculate_total([{'price': 33.33, 'quantity': 3}], 15)", "expected": "84.99", "hidden": true}
+    ]
+  }
+]

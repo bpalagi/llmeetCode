@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+
+{% block title %}LLMeetCode - Challenges{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <h1 class="text-3xl font-bold mb-2">Open Tickets</h1>
+    <p class="text-gray-400">Real-world coding challenges. LLMs allowed — but you'll need more than algorithms.</p>
+</div>
+
+<div class="grid gap-4">
+    {% for problem in problems %}
+    <a href="/challenge/{{ problem.id }}" class="ticket-card priority-{{ problem.priority|lower }} bg-gray-800 hover:bg-gray-750 rounded-lg p-6 block transition-all hover:translate-x-1">
+        <div class="flex items-start justify-between mb-3">
+            <div class="flex items-center gap-3">
+                <span class="type-badge type-{{ problem.type|lower|replace(' ', '-')|replace('jira ticket', 'jira')|replace('support request', 'support')|replace('bug report', 'bug') }}">
+                    {{ problem.type }}
+                </span>
+                <span class="text-xs text-gray-500">Priority: {{ problem.priority }}</span>
+            </div>
+            <span class="text-xs text-gray-500">Reporter: {{ problem.reporter }}</span>
+        </div>
+        
+        <h2 class="text-xl font-semibold text-white mb-2">{{ problem.title }}</h2>
+        
+        <p class="text-gray-400 text-sm line-clamp-2">
+            {{ problem.description[:200] }}{% if problem.description|length > 200 %}...{% endif %}
+        </p>
+        
+        <div class="mt-4 flex items-center gap-4 text-xs text-gray-500">
+            <span>{{ problem.tests|length }} test cases</span>
+            <span class="text-green-400">→ Start Challenge</span>
+        </div>
+    </a>
+    {% endfor %}
+</div>
+{% endblock %}

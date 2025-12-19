@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}{{ problem.title }} - LLMeetCode{% endblock %}
+
+{% block head %}
+<style>
+    #editor {
+        height: 400px;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    .test-result {
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-family: monospace;
+        font-size: 0.875rem;
+    }
+    .test-pass { background: #166534; color: #86efac; }
+    .test-fail { background: #991b1b; color: #fca5a5; }
+    .test-hidden { opacity: 0.7; }
+    .markdown-content pre {
+        background: #1f2937;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        overflow-x: auto;
+    }
+    .markdown-content code {
+        font-family: 'Monaco', 'Menlo', monospace;
+        font-size: 0.875rem;
+    }
+    .markdown-content p { margin-bottom: 0.75rem; }
+    .markdown-content ul { list-style: disc; margin-left: 1.5rem; margin-bottom: 0.75rem; }
+    .markdown-content strong { color: #f3f4f6; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <!-- Left: Problem Description -->
+    <div class="bg-gray-800 rounded-lg p-6">
+        <div class="flex items-center gap-3 mb-4">
+            <span class="type-badge type-{{ problem.type|lower|replace(' ', '-')|replace('jira ticket', 'jira')|replace('support request', 'support')|replace('bug report', 'bug') }}">
+                {{ problem.type }}
+            </span>
+            <span class="text-xs text-gray-500">Priority: {{ problem.priority }}</span>
+        </div>
+        
+        <h1 class="text-2xl font-bold text-white mb-2">{{ problem.title }}</h1>
+        <p class="text-xs text-gray-500 mb-6">Reporter: {{ problem.reporter }}</p>
+        
+        <div class="markdown-content text-gray-300 prose prose-invert max-w-none">
+            {{ problem.description | safe }}
+        </div>
+        
+        <div class="mt-6 pt-6 border-t border-gray-700">
+            <h3 class="text-sm font-semibold text-gray-400 mb-3">Test Cases ({{ problem.tests|length }} total)</h3>
+            <div class="space-y-2">
+                {% for test in problem.tests %}
+                {% if not test.hidden %}
+                <div class="bg-gray-900 rounded p-3 font-mono text-sm">
+                    <div class="text-gray-400">Input: <span class="text-blue-400">{{ test.input }}</span></div>
+                    <div class="text-gray-400">Expected: <span class="text-green-400">{{ test.expected }}</span></div>
+                </div>
+                {% endif %}
+                {% endfor %}
+                {% set hidden_count = problem.tests | selectattr('hidden') | list | length %}
+                {% if hidden_count > 0 %}
+                <p class="text-xs text-gray-500 italic">+ {{ hidden_count }} hidden test(s)</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Right: Code Editor & Results -->
+    <div class="space-y-4">
+        <div class="bg-gray-800 rounded-lg p-4">
+            <div class="flex items-center justify-between mb-3">
+                <span class="text-sm text-gray-400">solution.py</span>
+                <button id="reset-btn" class="text-xs text-gray-500 hover:text-gray-300">Reset Code</button>
+            </div>
+            <div id="editor"></div>
+        </div>
+        
+        <button id="submit-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2">
+            <span>Submit Solution</span>
+            <span id="submit-spinner" class="hidden">
+                <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+            </span>
+        </button>
+        
+        <div id="results" class="bg-gray-800 rounded-lg p-4 hidden">
+            <h3 class="text-lg font-semibold mb-3">Results</h3>
+            <div id="results-list" class="space-y-2"></div>
+            <div id="results-summary" class="mt-4 pt-4 border-t border-gray-700 text-center"></div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
+<script>
+    const problemId = "{{ problem.id }}";
+    const starterCode = {{ problem.starter_code | tojson }};
+    
+    let editor;
+    
+    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs' } });
+    
+    require(['vs/editor/editor.main'], function () {
+        monaco.editor.defineTheme('llmeetcode', {
+            base: 'vs-dark',
+            inherit: true,
+            rules: [],
+            colors: {
+                'editor.background': '#111827',
+            }
+        });
+        
+        editor = monaco.editor.create(document.getElementById('editor'), {
+            value: starterCode,
+            language: 'python',
+            theme: 'llmeetcode',
+            minimap: { enabled: false },
+            fontSize: 14,
+            lineNumbers: 'on',
+            scrollBeyondLastLine: false,
+            automaticLayout: true,
+            padding: { top: 16, bottom: 16 }
+        });
+    });
+    
+    document.getElementById('reset-btn').addEventListener('click', () => {
+        if (confirm('Reset code to starter template?')) {
+            editor.setValue(starterCode);
+        }
+    });
+    
+    document.getElementById('submit-btn').addEventListener('click', async () => {
+        const btn = document.getElementById('submit-btn');
+        const spinner = document.getElementById('submit-spinner');
+        const resultsDiv = document.getElementById('results');
+        const resultsList = document.getElementById('results-list');
+        const resultsSummary = document.getElementById('results-summary');
+        
+        btn.disabled = true;
+        spinner.classList.remove('hidden');
+        
+        try {
+            const response = await fetch(`/submit/${problemId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: editor.getValue() })
+            });
+            
+            const data = await response.json();
+            
+            resultsDiv.classList.remove('hidden');
+            resultsList.innerHTML = '';
+            
+            let passCount = 0;
+            data.test_results.forEach((result, i) => {
+                if (result.passed) passCount++;
+                const div = document.createElement('div');
+                div.className = `test-result ${result.passed ? 'test-pass' : 'test-fail'} ${result.hidden ? 'test-hidden' : ''}`;
+                div.innerHTML = `
+                    <span class="font-semibold">${result.hidden ? 'Hidden Test' : 'Test'} ${i + 1}:</span>
+                    ${result.passed ? '✓ Passed' : '✗ ' + result.message}
+                `;
+                resultsList.appendChild(div);
+            });
+            
+            const allPassed = data.all_passed;
+            resultsSummary.innerHTML = allPassed
+                ? '<span class="text-2xl">🎉</span> <span class="text-green-400 font-bold">All tests passed!</span>'
+                : `<span class="text-yellow-400">${passCount}/${data.test_results.length} tests passed</span>`;
+                
+        } catch (error) {
+            resultsDiv.classList.remove('hidden');
+            resultsList.innerHTML = `<div class="test-result test-fail">Error: ${error.message}</div>`;
+            resultsSummary.innerHTML = '';
+        } finally {
+            btn.disabled = false;
+            spinner.classList.add('hidden');
+        }
+    });
+</script>
+{% endblock %}

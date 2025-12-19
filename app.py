@@ -6,7 +6,7 @@ import json
 import uuid
 
 app = Flask(__name__)
-app.secret_key = os.urandom(24)
+app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
 
 # Load problems from JSON file
 def load_problems():

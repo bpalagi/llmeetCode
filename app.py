@@ -4,6 +4,7 @@ import tempfile
 import os
 import json
 import uuid
+import markdown
 
 app = Flask(__name__)
 app.secret_key = os.environ.get('SECRET_KEY', os.urandom(24))
@@ -24,6 +25,12 @@ def challenge(problem_id):
     problem = next((p for p in problems if p['id'] == problem_id), None)
     if not problem:
         return "Problem not found", 404
+    # Convert markdown description to HTML
+    problem = problem.copy()
+    problem['description'] = markdown.markdown(
+        problem['description'],
+        extensions=['fenced_code', 'codehilite']
+    )
     submissions = session.get('submissions', {}).get(problem_id, [])
     return render_template('challenge.html', problem=problem, submissions=submissions)
 

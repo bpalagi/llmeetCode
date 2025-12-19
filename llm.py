@@ -15,11 +15,10 @@ def get_client():
         client = genai.Client(api_key=api_key)
     return client
 
-def build_system_prompt(problem, current_code, submissions=None):
+def build_system_prompt(problem, current_code):
     """Build the system prompt with problem context."""
-    submission_context = format_submissions(submissions) if submissions else "No submissions yet."
-    
     return f"""You are a helpful coding assistant helping a developer solve a programming problem.
+This is an "LLM allowed" interview - the candidate gets ONE chance to deploy their solution to production.
 
 ## Problem: {problem['title']}
 Type: {problem['type']}
@@ -36,16 +35,13 @@ Priority: {problem['priority']}
 {current_code}
 ```
 
-## Submission History:
-{submission_context}
-
 ## Guidelines:
 - Help the user understand the problem and guide them toward a solution
 - Provide hints and explanations rather than complete solutions unless asked
 - If sharing code, use markdown code blocks
 - Be concise and focused on the coding task
 - If the user's code has bugs, help them identify and fix the issues
-- Reference their submission history when relevant (e.g., if tests are failing)
+- Remember: they only get ONE deployment attempt, so help them be confident before deploying
 """
 
 def format_test_cases(tests):
@@ -59,28 +55,7 @@ def format_test_cases(tests):
         lines.append(f"(+ {hidden_count} hidden tests)")
     return '\n'.join(lines)
 
-def format_submissions(submissions):
-    """Format submission history for the prompt."""
-    if not submissions:
-        return "No submissions yet."
-    
-    lines = []
-    for i, sub in enumerate(submissions, 1):
-        passed_count = sum(1 for r in sub.get('results', []) if r.get('passed'))
-        total_count = len(sub.get('results', []))
-        status = "✓ All passed" if sub.get('passed') else f"✗ {passed_count}/{total_count} passed"
-        lines.append(f"Submission #{i}: {status}")
-        
-        # Include failure details for the most recent submission
-        if i == len(submissions) and not sub.get('passed'):
-            for j, result in enumerate(sub.get('results', []), 1):
-                if not result.get('passed'):
-                    msg = result.get('message', 'Failed')
-                    lines.append(f"  - Test {j}: {msg}")
-    
-    return '\n'.join(lines)
-
-def chat(problem, current_code, user_message, chat_history=None, submissions=None):
+def chat(problem, current_code, user_message, chat_history=None):
     """Send a chat message and get a response from Gemini.
     
     Args:
@@ -88,7 +63,6 @@ def chat(problem, current_code, user_message, chat_history=None, submissions=Non
         current_code: The user's current code in the editor
         user_message: The user's chat message
         chat_history: List of previous messages [{"role": "user"|"model", "content": "..."}]
-        submissions: List of submission results for context
     
     Returns:
         dict with 'response' (str) and 'error' (str or None)
@@ -97,7 +71,7 @@ def chat(problem, current_code, user_message, chat_history=None, submissions=Non
         gemini_client = get_client()
         
         # Build the conversation contents
-        system_prompt = build_system_prompt(problem, current_code, submissions)
+        system_prompt = build_system_prompt(problem, current_code)
         
         # Build contents array for the API
         contents = []
@@ -143,7 +117,7 @@ def chat(problem, current_code, user_message, chat_history=None, submissions=Non
             "error": str(e)
         }
 
-def chat_stream(problem, current_code, user_message, chat_history=None, submissions=None):
+def chat_stream(problem, current_code, user_message, chat_history=None):
     """Stream a chat response from Gemini.
     
     Yields chunks of the response text as they arrive.
@@ -152,7 +126,7 @@ def chat_stream(problem, current_code, user_message, chat_history=None, submissi
         gemini_client = get_client()
         
         # Build the conversation contents
-        system_prompt = build_system_prompt(problem, current_code, submissions)
+        system_prompt = build_system_prompt(problem, current_code)
         
         # Build contents array for the API
         contents = []

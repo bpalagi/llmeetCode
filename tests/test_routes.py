@@ -83,14 +83,3 @@ def validate_user(email, password, username):
         assert data['all_passed'] is False
 
 
-class TestHistoryEndpoint:
-    def test_history_returns_json(self, client):
-        response = client.get('/history/refactor-user-validator')
-        assert response.status_code == 200
-        data = response.get_json()
-        assert isinstance(data, list)
-
-    def test_history_empty_initially(self, client):
-        response = client.get('/history/refactor-user-validator')
-        data = response.get_json()
-        assert data == []

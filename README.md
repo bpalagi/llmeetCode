@@ -9,7 +9,8 @@ A coding challenge platform where problems look like **Jira tickets**, **Support
 - **Ticket-style problems** — Challenges framed as realistic work tasks
 - **Monaco code editor** — VS Code's editor in the browser
 - **Instant feedback** — Run code against visible + hidden test cases
-- **Session tracking** — Submission history per challenge
+- **One chance to deploy** — Like real production, you only get one shot
+- **AI assistant** — Chat with Gemini for hints and code review
 
 ## Local Development
 

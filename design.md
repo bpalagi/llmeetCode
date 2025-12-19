@@ -1,7 +1,8 @@
 # LLMeetCode
 
 > "Interviews for the modern enterprise" — LLMs allowed, and it's not just memorizing algorithms.
-> Interview aspect is the discussion around the code and problem-solving approach, not just the final submission
+> Interview aspect is the discussion around the code and problem-solving approach, not just the final submission.
+> **One chance to deploy** — like real production, you only get one shot.
 
 ## Overview
 
@@ -56,7 +57,13 @@ llmeetCode/
 |-------|--------|-------------|
 | `/` | GET | Homepage listing all challenges |
 | `/challenge/<id>` | GET | Challenge detail with code editor |
-| `/submit/<id>` | POST | Submit code, run tests, return results |
+| `/submit/<id>` | POST | Deploy code to prod (one chance only) |
+| `/chat/<id>` | POST | Chat with AI assistant |
+| `/chat/stream/<id>` | POST | Streaming chat with AI assistant |
+| `/chat/history/<id>` | GET | Get chat history for a problem |
+| `/chat/clear/<id>` | POST | Clear chat history |
+| `/chat/save/<id>` | POST | Save chat exchange to history |
+| `/complete/<id>` | POST | Get code completion suggestions |
 
 ---
 
@@ -133,8 +140,7 @@ tests/
 - `GET /` — Returns homepage with problem list
 - `GET /challenge/<id>` — Returns challenge page for valid ID
 - `GET /challenge/<id>` — Returns 404 for invalid ID
-- `POST /submit/<id>` — Executes code and returns test results
-- `GET /history/<id>` — Returns submission history
+- `POST /submit/<id>` — Deploys code and returns test results
 
 **Code Execution Tests (`test_code_execution.py`)**
 - `run_single_test` — Passes for correct code

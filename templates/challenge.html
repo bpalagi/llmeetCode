@@ -246,8 +246,8 @@
             <div id="editor"></div>
         </div>
         
-        <button id="submit-btn" class="w-full bg-green-600 hover:bg-green-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2">
-            <span>Submit Solution</span>
+        <button id="submit-btn" class="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2">
+            <span>🚀 Deploy to Prod</span>
             <span id="submit-spinner" class="hidden">
                 <svg class="animate-spin h-5 w-5" viewBox="0 0 24 24">
                     <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle>
@@ -260,29 +260,6 @@
             <h3 class="text-lg font-semibold mb-3">Results</h3>
             <div id="results-list" class="space-y-2"></div>
             <div id="results-summary" class="mt-4 pt-4 border-t border-gray-700 text-center"></div>
-        </div>
-        
-        <!-- Submission History -->
-        <div id="history" class="bg-gray-800 rounded-lg p-4">
-            <h3 class="text-lg font-semibold mb-3">Submission History</h3>
-            <div id="history-list" class="space-y-2">
-                {% if submissions %}
-                    {% for sub in submissions|reverse %}
-                    <div class="flex items-center justify-between p-2 rounded {{ 'bg-green-900/30' if sub.passed else 'bg-red-900/30' }}">
-                        <span class="text-sm font-mono text-gray-400">#{{ loop.revindex }}</span>
-                        <span class="text-sm">
-                            {% set pass_count = sub.results|selectattr('passed')|list|length %}
-                            {{ pass_count }}/{{ sub.results|length }} tests
-                        </span>
-                        <span class="{{ 'text-green-400' if sub.passed else 'text-red-400' }}">
-                            {{ '✓ Passed' if sub.passed else '✗ Failed' }}
-                        </span>
-                    </div>
-                    {% endfor %}
-                {% else %}
-                    <p class="text-gray-500 text-sm italic">No submissions yet</p>
-                {% endif %}
-            </div>
         </div>
     </div>
 </div>
@@ -327,8 +304,7 @@
 <script id="problem-data" type="application/json">
 {
     "id": {{ problem.id | tojson }},
-    "starterCode": {{ problem.starter_code | tojson }},
-    "submissionCount": {{ submissions|length }}
+    "starterCode": {{ problem.starter_code | tojson }}
 }
 </script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.44.0/min/vs/loader.min.js"></script>
@@ -520,44 +496,23 @@
             
             const allPassed = data.all_passed;
             resultsSummary.innerHTML = allPassed
-                ? '<span class="text-2xl">🎉</span> <span class="text-green-400 font-bold">All tests passed!</span>'
-                : `<span class="text-yellow-400">${passCount}/${data.test_results.length} tests passed</span>`;
+                ? '<span class="text-2xl">🎉</span> <span class="text-green-400 font-bold">Deployed successfully! All tests passed!</span>'
+                : `<span class="text-red-400">⚠️ Deployment failed: ${passCount}/${data.test_results.length} tests passed</span>`;
             
-            // Update submission history
-            updateHistory(allPassed, passCount, data.test_results.length);
+            // Disable button permanently - one chance only
+            btn.disabled = true;
+            btn.classList.remove('bg-red-600', 'hover:bg-red-700');
+            btn.classList.add('bg-gray-600', 'cursor-not-allowed');
+            btn.querySelector('span').textContent = allPassed ? '✓ Deployed' : '✗ Deployment Failed';
                 
         } catch (error) {
             resultsDiv.classList.remove('hidden');
             resultsList.innerHTML = `<div class="test-result test-fail">Error: ${error.message}</div>`;
             resultsSummary.innerHTML = '';
         } finally {
-            btn.disabled = false;
             spinner.classList.add('hidden');
         }
     });
-    
-    let submissionCount = problemData.submissionCount;
-    
-    function updateHistory(passed, passCount, totalTests) {
-        submissionCount++;
-        const historyList = document.getElementById('history-list');
-        
-        // Remove "No submissions yet" message if present
-        const emptyMsg = historyList.querySelector('p');
-        if (emptyMsg) emptyMsg.remove();
-        
-        // Add new submission at the top
-        const div = document.createElement('div');
-        div.className = `flex items-center justify-between p-2 rounded ${passed ? 'bg-green-900/30' : 'bg-red-900/30'}`;
-        div.innerHTML = `
-            <span class="text-sm font-mono text-gray-400">#${submissionCount}</span>
-            <span class="text-sm">${passCount}/${totalTests} tests</span>
-            <span class="${passed ? 'text-green-400' : 'text-red-400'}">
-                ${passed ? '✓ Passed' : '✗ Failed'}
-            </span>
-        `;
-        historyList.insertBefore(div, historyList.firstChild);
-    }
     
     // Chat functionality
     const chatToggle = document.getElementById('chat-toggle');

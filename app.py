@@ -36,13 +36,7 @@ def challenge(problem_id):
         problem['description'],
         extensions=['fenced_code', 'codehilite']
     )
-    submissions = session.get('submissions', {}).get(problem_id, [])
-    return render_template('challenge.html', problem=problem, submissions=submissions)
-
-@app.route('/history/<problem_id>')
-def history(problem_id):
-    submissions = session.get('submissions', {}).get(problem_id, [])
-    return jsonify(submissions)
+    return render_template('challenge.html', problem=problem)
 
 @app.route('/submit/<problem_id>', methods=['POST'])
 def submit(problem_id):
@@ -55,18 +49,6 @@ def submit(problem_id):
     
     # Run the code with test cases
     results = run_tests(code, problem['tests'], problem.get('setup_code', ''))
-    
-    # Track submission in session
-    if 'submissions' not in session:
-        session['submissions'] = {}
-    if problem_id not in session['submissions']:
-        session['submissions'][problem_id] = []
-    session['submissions'][problem_id].append({
-        'id': str(uuid.uuid4())[:8],
-        'passed': results['all_passed'],
-        'results': results['test_results']
-    })
-    session.modified = True
     
     return jsonify(results)
 
@@ -156,11 +138,8 @@ def chat(problem_id):
     
     chat_history = session[chat_key]
     
-    # Get submission history for context
-    submissions = session.get('submissions', {}).get(problem_id, [])
-    
     # Call LLM
-    result = llm_chat(problem, current_code, user_message, chat_history, submissions)
+    result = llm_chat(problem, current_code, user_message, chat_history)
     
     if result['error']:
         return jsonify({'error': result['error']}), 500
@@ -210,11 +189,10 @@ def chat_stream(problem_id):
         session[chat_key] = []
     
     chat_history = session[chat_key]
-    submissions = session.get('submissions', {}).get(problem_id, [])
     
     def generate():
         full_response = []
-        for chunk in llm_chat_stream(problem, current_code, user_message, chat_history, submissions):
+        for chunk in llm_chat_stream(problem, current_code, user_message, chat_history):
             full_response.append(chunk)
             yield f"data: {json.dumps({'chunk': chunk})}\n\n"
         

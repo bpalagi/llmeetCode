@@ -26,3 +26,5 @@ htmlcov/
 # Environment variables
 .env
 .env.local
+
+.plan.md

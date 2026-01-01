@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="mb-8">
+    <h2 class="text-2xl font-bold text-gray-900 mb-2">Coding Challenges</h2>
+    <p class="text-gray-600">Practice real-world coding problems in a professional development environment</p>
+</div>
+
+<!-- Filters -->
+<div class="bg-white rounded-lg shadow-sm p-4 mb-6">
+    <div class="flex flex-wrap gap-4">
+        <select class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option>All Difficulties</option>
+            <option>Easy</option>
+            <option>Medium</option>
+            <option>Hard</option>
+        </select>
+        <select class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option>All Topics</option>
+            <option>Array</option>
+            <option>String</option>
+            <option>Tree</option>
+            <option>Dynamic Programming</option>
+        </select>
+        <select class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <option>All Languages</option>
+            <option>Python</option>
+            <option>JavaScript</option>
+            <option>Java</option>
+        </select>
+    </div>
+</div>
+
+<!-- Problem List -->
+<div class="grid gap-4">
+    {% for problem in problems %}
+    <div class="problem-card bg-white rounded-lg shadow-sm p-6 difficulty-{{ problem.difficulty.lower() }}">
+        <div class="flex items-start justify-between">
+            <div class="flex-1">
+                <div class="flex items-center gap-3 mb-2">
+                    <h3 class="text-lg font-semibold text-gray-900">{{ problem.title }}</h3>
+                    <span class="px-2 py-1 text-xs font-medium rounded-full
+                        {% if problem.difficulty == 'Easy' %}bg-green-100 text-green-800
+                        {% elif problem.difficulty == 'Medium' %}bg-yellow-100 text-yellow-800
+                        {% else %}bg-red-100 text-red-800{% endif %}">
+                        {{ problem.difficulty }}
+                    </span>
+                </div>
+                <p class="text-gray-600 mb-3">{{ problem.description }}</p>
+                <div class="flex items-center gap-4 text-sm text-gray-500">
+                    <span><i class="fas fa-code mr-1"></i>{{ problem.language }}</span>
+                    {% for topic in problem.topics %}
+                    <span class="px-2 py-1 bg-gray-100 rounded">{{ topic }}</span>
+                    {% endfor %}
+                </div>
+            </div>
+            <div class="ml-4">
+                <button 
+                    onclick="openCodespace('{{ problem.id }}')"
+                    class="bg-blue-600 text-white px-4 py-2 rounded-md font-medium hover:bg-blue-700 transition flex items-center gap-2">
+                    <i class="fab fa-github"></i>
+                    Open in Codespaces
+                </button>
+            </div>
+        </div>
+    </div>
+    {% endfor %}
+</div>
+
+{% if not logged_in %}
+<div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+    <div class="flex items-center">
+        <i class="fas fa-info-circle text-blue-600 text-xl mr-3"></i>
+        <div>
+            <h3 class="font-semibold text-blue-900 mb-1">GitHub Login Required</h3>
+            <p class="text-blue-700 text-sm">You need to login with GitHub to create Codespaces. Each Codespace is a temporary, isolated development environment.</p>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}

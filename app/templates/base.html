@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}LLMeet - Coding Interview Platform{% endblock %}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .problem-card {
+            transition: all 0.3s ease;
+        }
+        .problem-card:hover {
+            transform: translateY(-2px);
+        }
+        .difficulty-easy { border-left: 4px solid #10b981; }
+        .difficulty-medium { border-left: 4px solid #f59e0b; }
+        .difficulty-hard { border-left: 4px solid #ef4444; }
+    </style>
+</head>
+<body class="bg-gray-50" data-logged-in="{{ 'true' if logged_in else 'false' }}">
+    <!-- Navigation -->
+    <nav class="bg-white shadow-sm border-b">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <h1 class="text-xl font-bold text-gray-900">
+                        <i class="fas fa-code text-blue-600 mr-2"></i>
+                        LLMeet
+                    </h1>
+                </div>
+                <div class="flex items-center space-x-4">
+                    {% if logged_in %}
+                        <div class="flex items-center space-x-3">
+                            {% if user.avatar_url %}
+                                <img src="{{ user.avatar_url }}" alt="Avatar" class="w-8 h-8 rounded-full">
+                            {% endif %}
+                            <span class="text-sm text-gray-700">{{ user.name or user.login }}</span>
+                            <a href="/auth/logout" class="text-sm text-gray-500 hover:text-gray-700">
+                                <i class="fas fa-sign-out-alt"></i> Logout
+                            </a>
+                        </div>
+                    {% else %}
+                        <a href="/auth/login" class="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-blue-700 transition">
+                            <i class="fab fa-github mr-2"></i>Login with GitHub
+                        </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <p class="text-center text-sm text-gray-500">
+                Powered by GitHub Codespaces • Built with FastAPI
+            </p>
+        </div>
+    </footer>
+
+    <!-- Loading Modal -->
+    <div id="loadingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+            <div class="text-center">
+                <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
+                <p class="mt-4 text-gray-700">Creating your Codespace...</p>
+                <p class="text-sm text-gray-500 mt-2">This usually takes 20-30 seconds</p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Show loading modal
+        function showLoading() {
+            document.getElementById('loadingModal').classList.remove('hidden');
+        }
+
+        // Hide loading modal
+        function hideLoading() {
+            document.getElementById('loadingModal').classList.add('hidden');
+        }
+
+        // Create codespace and redirect
+        async function openCodespace(problemId) {
+            // Check login status from body data attribute
+            const isLoggedIn = document.body.dataset.loggedIn === 'true';
+            
+            if (!isLoggedIn) {
+                window.location.href = '/auth/login';
+                return;
+            }
+
+            showLoading();
+
+            try {
+                const response = await fetch('/codespaces/create', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        problem_id: problemId,
+                        language: 'python'
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to create codespace');
+                }
+
+                const data = await response.json();
+                window.location.href = data.url;
+            } catch (error) {
+                hideLoading();
+                alert('Error creating codespace: ' + error.message);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -77,6 +77,54 @@ Example devcontainer.json:
             ]
         }
     }
-}
 ```
+
+## Git Hooks
+
+### Pre-commit Hook
+
+The repository includes a pre-commit hook that automatically runs tests before allowing commits. This ensures code quality and prevents broken code from being committed.
+
+The hook will:
+- Create/activate a virtual environment if needed
+- Install test dependencies
+- Run all tests with coverage
+- Block the commit if any tests fail
+
+### Pre-push Hook
+
+A pre-push hook provides a reminder about Render deployment when pushing changes.
+
+## Deployment to Render
+
+### Automatic Deployment
+
+The project is configured for automatic deployment to Render when pushing to the main branch.
+
+1. **Prerequisites**:
+   - Connect your GitHub repository to Render
+   - Render will automatically detect the `render.yaml` configuration
+
+2. **Configuration Files**:
+   - `render.yaml` - Defines the web service and build settings
+   - `Procfile` - Specifies the command to run the web server
+   - `requirements.txt` - Lists all Python dependencies
+
+3. **Environment Variables**:
+   Set these in your Render dashboard:
+   - `GITHUB_CLIENT_ID` - Your GitHub OAuth app client ID
+   - `GITHUB_CLIENT_SECRET` - Your GitHub OAuth app client secret
+   - `GITHUB_REDIRECT_URI` - Your Render app URL + `/auth/callback`
+   - `SECRET_KEY` - A secure random string for session encryption
+   - `TEMPLATE_REPO` - GitHub repository for codespace templates
+
+4. **Deployment Process**:
+   - Push to your main branch
+   - Render automatically builds and deploys
+   - Tests run during the build process
+   - Your app is live at your Render URL
+
+### Manual Deployment
+
+If auto-deploy is disabled, you can trigger deployments manually from the Render dashboard.
 

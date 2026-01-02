@@ -1,0 +1,26 @@
+services:
+  # Web Service
+  - type: web
+    name: llmeetcode
+    env: python
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+    healthCheckPath: /
+    
+    # Environment variables (set these in Render dashboard)
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        sync: false
+        
+  # Postgres Database (optional - uncomment if you need PostgreSQL)
+  # - type: pserv
+  #   name: llmeetcode-db
+  #   plan: free
+  #   databaseName: llmeetcode
+  #   user: llmeetcode
+
+# Auto-deploy on push to main branch
+version: "1"

@@ -1,3 +1,7 @@
+Deploy to render.
+
+Raise test coverage
+
 Look at getting a more wholistic example setup
 
 Figure out how this could be deployed to avoid needing to run on a local machine.

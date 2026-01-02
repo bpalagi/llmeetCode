@@ -1,20 +1,28 @@
 from fastapi import FastAPI, Request, HTTPException, Depends
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
 import os
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import secrets
 from itsdangerous import URLSafeTimedSerializer, BadSignature
 import asyncio
 from dotenv import load_dotenv
+from sqlalchemy.orm import Session
+
+from .database import get_db, init_db, User, CompletedProblem
 
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(title="LLMeet - Coding Interview Platform")
+app = FastAPI(title="LLMeetCode - Coding Interview Platform")
+
+# Initialize database on startup
+@app.on_event("startup")
+def startup_event():
+    init_db()
 
 # Configuration
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
@@ -49,6 +57,54 @@ SAMPLE_PROBLEMS = [
         "description": "Given two sorted integer arrays nums1 and nums2, merge nums2 into nums1 as one sorted array.",
         "topics": ["Array", "Two Pointers"],
         "language": "Python"
+    },
+    {
+        "id": "binary-tree-inorder",
+        "title": "Binary Tree Inorder Traversal",
+        "difficulty": "Easy",
+        "description": "Given the root of a binary tree, return the inorder traversal of its nodes' values.",
+        "topics": ["Tree", "Depth-First Search"],
+        "language": "Python"
+    },
+    {
+        "id": "validate-binary-tree",
+        "title": "Validate Binary Search Tree",
+        "difficulty": "Medium",
+        "description": "Given the root of a binary tree, determine if it is a valid binary search tree.",
+        "topics": ["Tree", "Binary Search Tree"],
+        "language": "Java"
+    },
+    {
+        "id": "longest-palindromic-substring",
+        "title": "Longest Palindromic Substring",
+        "difficulty": "Hard",
+        "description": "Given a string s, return the longest palindromic substring in s.",
+        "topics": ["String", "Dynamic Programming"],
+        "language": "Python"
+    },
+    {
+        "id": "coin-change",
+        "title": "Coin Change",
+        "difficulty": "Medium",
+        "description": "You are given an integer array coins representing coins of different denominations and an integer amount. Return the fewest number of coins that you need to make up that amount.",
+        "topics": ["Array", "Dynamic Programming", "Breadth-First Search"],
+        "language": "JavaScript"
+    },
+    {
+        "id": "merge-k-sorted-lists",
+        "title": "Merge K Sorted Lists",
+        "difficulty": "Hard",
+        "description": "You are given an array of k linked-lists lists, each linked-list is sorted in ascending order. Merge all the linked-lists into one sorted linked-list.",
+        "topics": ["Linked List", "Divide and Conquer", "Heap"],
+        "language": "Python"
+    },
+    {
+        "id": "reverse-linked-list",
+        "title": "Reverse Linked List",
+        "difficulty": "Easy",
+        "description": "Given the head of a singly linked list, reverse the list, and return the reversed list.",
+        "topics": ["Linked List"],
+        "language": "Java"
     }
 ]
 
@@ -66,8 +122,13 @@ def get_session_data(request: Request) -> Dict[str, Any]:
     except BadSignature:
         return {}
 
-async def create_codespace(access_token: str, problem_id: str) -> str:
+async def create_codespace(access_token: str, problem_id: str) -> dict:
     """Create a GitHub Codespace for the given problem"""
+    
+    # Validate problem ID exists
+    problem = next((p for p in SAMPLE_PROBLEMS if p["id"] == problem_id), None)
+    if not problem:
+        raise HTTPException(status_code=404, detail="Problem not found")
     
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -119,7 +180,7 @@ async def create_codespace(access_token: str, problem_id: str) -> str:
             "location": "WestUs2",
             "machine": machine_type, # Use the fetched machine type
             "devcontainer_path": ".devcontainer/devcontainer.json",
-            "display_name": f"llmeet-{problem_id}-{secrets.token_hex(4)}",
+            "display_name": f"llmeetcode-{problem_id}-{secrets.token_hex(4)}",
             "idle_timeout_minutes": 30
         }
         
@@ -140,41 +201,67 @@ async def create_codespace(access_token: str, problem_id: str) -> str:
             )
         
         codespace = response.json()
-        codespace_name = codespace["name"]
         
-        # Poll for codespace to be ready
-        print(f"Waiting for codespace {codespace_name} to be ready...")  # Debug print
-        for i in range(60):  # Wait up to 60 seconds (increased from 30)
-            await asyncio.sleep(1)
-            
-            status_response = await client.get(
-                f"https://api.github.com/user/codespaces/{codespace_name}",
-                headers=headers
-            )
-            
-            if status_response.status_code == 200:
-                codespace_status = status_response.json()
-                state = codespace_status.get("state")
-                print(f"Codespace status (attempt {i+1}/60): {state}")  # Debug print
-                if state == "Available":
-                    return codespace_status["web_url"]
-        
-        raise HTTPException(
-            status_code=500,
-            detail="Codespace creation timed out after 60 seconds"
-        )
+        # Return the codespace info immediately, even if still provisioning
+        return {
+            "name": codespace["name"],
+            "web_url": codespace.get("web_url", f"https://github.com/codespaces/{codespace['name']}"),
+            "state": codespace.get("state", "Unknown"),
+            "created_at": codespace.get("created_at")
+        }
 
 @app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
+async def home(request: Request, db: Session = Depends(get_db), difficulty: Optional[str] = None, topic: Optional[str] = None, language: Optional[str] = None, hide_completed: Optional[str] = None):
     """Main page listing coding problems"""
     session = get_session_data(request)
+    
+    # Parse hide_completed as boolean
+    hide_completed_bool = hide_completed == "true"
+    
+    # Get completed problem IDs for logged in user
+    completed_ids = set()
+    if session and "user_id" in session:
+        completed = db.query(CompletedProblem).filter(
+            CompletedProblem.user_id == session["user_id"]
+        ).all()
+        completed_ids = {cp.problem_id for cp in completed}
+    
+    # Filter problems based on query parameters
+    filtered_problems = SAMPLE_PROBLEMS.copy()
+    
+    if difficulty and difficulty != "All Difficulties":
+        filtered_problems = [p for p in filtered_problems if p["difficulty"] == difficulty]
+    
+    if topic and topic != "All Topics":
+        filtered_problems = [p for p in filtered_problems if topic in p["topics"]]
+    
+    if language and language != "All Languages":
+        filtered_problems = [p for p in filtered_problems if p["language"] == language]
+    
+    # Hide completed problems if requested
+    if hide_completed_bool and completed_ids:
+        filtered_problems = [p for p in filtered_problems if p["id"] not in completed_ids]
+    
+    # Get unique values for filter options
+    all_difficulties = sorted(set(p["difficulty"] for p in SAMPLE_PROBLEMS))
+    all_topics = sorted(set(topic for p in SAMPLE_PROBLEMS for topic in p["topics"]))
+    all_languages = sorted(set(p["language"] for p in SAMPLE_PROBLEMS))
+    
     return templates.TemplateResponse(
         "index.html",
         {
             "request": request,
-            "problems": SAMPLE_PROBLEMS,
+            "problems": filtered_problems,
             "user": session.get("user"),
-            "logged_in": bool(session)
+            "logged_in": bool(session),
+            "completed_ids": completed_ids,
+            "hide_completed": "true" if hide_completed_bool else "false",
+            "selected_difficulty": difficulty or "All Difficulties",
+            "selected_topic": topic or "All Topics",
+            "selected_language": language or "All Languages",
+            "all_difficulties": all_difficulties,
+            "all_topics": all_topics,
+            "all_languages": all_languages
         }
     )
 
@@ -187,10 +274,10 @@ async def login():
         f"redirect_uri={GITHUB_REDIRECT_URI}&"
         f"scope=codespace user:email"
     )
-    return RedirectResponse(auth_url)
+    return RedirectResponse(auth_url, status_code=302)
 
 @app.get("/auth/callback")
-async def auth_callback(code: str):
+async def auth_callback(code: str, db: Session = Depends(get_db)):
     """Handle GitHub OAuth callback"""
     
     # Exchange code for access token
@@ -228,9 +315,32 @@ async def auth_callback(code: str):
         
         user_data = user_response.json()
     
+    # Create or update user in database
+    github_id = user_data["id"]
+    db_user = db.query(User).filter(User.github_id == github_id).first()
+    
+    if db_user:
+        # Update existing user
+        db_user.login = user_data["login"]
+        db_user.name = user_data.get("name")
+        db_user.avatar_url = user_data.get("avatar_url")
+    else:
+        # Create new user
+        db_user = User(
+            github_id=github_id,
+            login=user_data["login"],
+            name=user_data.get("name"),
+            avatar_url=user_data.get("avatar_url")
+        )
+        db.add(db_user)
+    
+    db.commit()
+    db.refresh(db_user)
+    
     # Create session
     session_data = {
         "access_token": access_token,
+        "user_id": db_user.id,
         "user": {
             "login": user_data["login"],
             "name": user_data.get("name"),
@@ -240,7 +350,7 @@ async def auth_callback(code: str):
     
     session_token = serializer.dumps(session_data)
     
-    response = RedirectResponse(url="/", status_code=303)
+    response = RedirectResponse(url="/", status_code=302)
     response.set_cookie(
         "session",
         session_token,
@@ -264,11 +374,11 @@ async def create_codespace_endpoint(
         raise HTTPException(status_code=401, detail="Not authenticated")
     
     try:
-        codespace_url = await create_codespace(
+        codespace_info = await create_codespace(
             session["access_token"],
             request.problem_id
         )
-        return {"url": codespace_url}
+        return codespace_info
     except HTTPException:
         raise
     except Exception as e:
@@ -277,8 +387,104 @@ async def create_codespace_endpoint(
 @app.get("/auth/logout")
 async def logout():
     """Clear session and logout"""
-    response = RedirectResponse(url="/", status_code=303)
+    response = RedirectResponse(url="/", status_code=302)
     response.delete_cookie("session")
+    return response
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard(request: Request, db: Session = Depends(get_db)):
+    """User dashboard showing completed problems"""
+    session = get_session_data(request)
+    
+    if not session or "user_id" not in session:
+        return RedirectResponse(url="/auth/login", status_code=302)
+    
+    user_id = session["user_id"]
+    
+    # Get completed problems for this user
+    completed = db.query(CompletedProblem).filter(
+        CompletedProblem.user_id == user_id
+    ).order_by(CompletedProblem.completed_at.desc()).all()
+    
+    completed_ids = {cp.problem_id for cp in completed}
+    
+    # Match with problem details
+    completed_problems = []
+    for cp in completed:
+        problem = next((p for p in SAMPLE_PROBLEMS if p["id"] == cp.problem_id), None)
+        if problem:
+            completed_problems.append({
+                **problem,
+                "completed_at": cp.completed_at
+            })
+    
+    # Stats
+    stats = {
+        "total": len(completed),
+        "easy": len([p for p in completed_problems if p["difficulty"] == "Easy"]),
+        "medium": len([p for p in completed_problems if p["difficulty"] == "Medium"]),
+        "hard": len([p for p in completed_problems if p["difficulty"] == "Hard"]),
+    }
+    
+    return templates.TemplateResponse(
+        "dashboard.html",
+        {
+            "request": request,
+            "user": session.get("user"),
+            "logged_in": True,
+            "completed_problems": completed_problems,
+            "stats": stats,
+            "total_problems": len(SAMPLE_PROBLEMS)
+        }
+    )
+
+
+@app.post("/problems/{problem_id}/complete")
+async def mark_complete(problem_id: str, request: Request, db: Session = Depends(get_db)):
+    """Mark a problem as completed"""
+    session = get_session_data(request)
+    
+    if not session or "user_id" not in session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    user_id = session["user_id"]
+    
+    # Check if already completed
+    existing = db.query(CompletedProblem).filter(
+        CompletedProblem.user_id == user_id,
+        CompletedProblem.problem_id == problem_id
+    ).first()
+    
+    if existing:
+        return JSONResponse({"status": "already_completed"})
+    
+    # Add completion
+    completion = CompletedProblem(user_id=user_id, problem_id=problem_id)
+    db.add(completion)
+    db.commit()
+    
+    return JSONResponse({"status": "completed"})
+
+
+@app.delete("/problems/{problem_id}/complete")
+async def unmark_complete(problem_id: str, request: Request, db: Session = Depends(get_db)):
+    """Remove completion status from a problem"""
+    session = get_session_data(request)
+    
+    if not session or "user_id" not in session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    
+    user_id = session["user_id"]
+    
+    # Delete completion
+    db.query(CompletedProblem).filter(
+        CompletedProblem.user_id == user_id,
+        CompletedProblem.problem_id == problem_id
+    ).delete()
+    db.commit()
+    
+    return JSONResponse({"status": "removed"})
     return response
 
 if __name__ == "__main__":

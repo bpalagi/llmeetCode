@@ -5,3 +5,5 @@ python-multipart==0.0.6
 httpx==0.25.2
 itsdangerous==2.1.2
 python-dotenv==1.0.0
+sqlalchemy>=2.0.45
+aiosqlite==0.19.0

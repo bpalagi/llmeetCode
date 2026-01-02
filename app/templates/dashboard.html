@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - LLMeetCode{% endblock %}
+
+{% block content %}
+<div class="mb-8">
+    <!-- User Header -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+        <div class="flex items-center gap-4">
+            {% if user.avatar_url %}
+            <img src="{{ user.avatar_url }}" alt="Avatar" class="w-16 h-16 rounded-full">
+            {% endif %}
+            <div>
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">{{ user.name or user.login }}</h2>
+                <p class="text-gray-600 dark:text-gray-400">@{{ user.login }}</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 text-center">
+            <div id="stat-total" class="text-3xl font-bold text-blue-600 dark:text-blue-400">{{ stats.total }}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Completed</div>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 text-center">
+            <div id="stat-easy" class="text-3xl font-bold text-green-600 dark:text-green-400">{{ stats.easy }}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Easy</div>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 text-center">
+            <div id="stat-medium" class="text-3xl font-bold text-yellow-600 dark:text-yellow-400">{{ stats.medium }}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Medium</div>
+        </div>
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 text-center">
+            <div id="stat-hard" class="text-3xl font-bold text-red-600 dark:text-red-400">{{ stats.hard }}</div>
+            <div class="text-sm text-gray-600 dark:text-gray-400">Hard</div>
+        </div>
+    </div>
+
+    <!-- Progress Bar -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-6">
+        <div class="flex justify-between mb-2">
+            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Overall Progress</span>
+            <span id="progress-text" class="text-sm text-gray-600 dark:text-gray-400">{{ stats.total }} / {{ total_problems }} problems</span>
+        </div>
+        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
+            {% set progress = (stats.total / total_problems * 100) if total_problems > 0 else 0 %}
+            <div id="progress-bar" class="bg-blue-600 h-3 rounded-full transition-all duration-300" style="width: {{ progress }}%"></div>
+        </div>
+    </div>
+
+    <!-- Completed Problems List -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <i class="fas fa-check-circle text-green-500 mr-2"></i>
+            Completed Problems
+        </h3>
+        
+        {% if completed_problems %}
+        <div class="space-y-3" id="completed-list">
+            {% for problem in completed_problems %}
+            <div id="problem-{{ problem.id }}" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg transition-all duration-300">
+                <div class="flex items-center gap-3">
+                    <i class="fas fa-check-circle text-green-500"></i>
+                    <div>
+                        <span class="font-medium text-gray-900 dark:text-white">{{ problem.title }}</span>
+                        <span class="ml-2 px-2 py-0.5 text-xs font-medium rounded-full
+                            {% if problem.difficulty == 'Easy' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                            {% elif problem.difficulty == 'Medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
+                            {% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">
+                            {{ problem.difficulty }}
+                        </span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span class="text-sm text-gray-500 dark:text-gray-400">
+                        {{ problem.completed_at.strftime('%b %d, %Y') }}
+                    </span>
+                    <button onclick="uncomplete('{{ problem.id }}', '{{ problem.difficulty }}')" 
+                        class="text-gray-400 hover:text-red-500 transition" title="Remove completion">
+                        <i class="fas fa-times"></i>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div id="empty-state" class="text-center py-8 text-gray-500 dark:text-gray-400">
+            <i class="fas fa-clipboard-list text-4xl mb-3"></i>
+            <p>No completed problems yet.</p>
+            <a href="/" class="text-blue-600 hover:text-blue-700 dark:text-blue-400 mt-2 inline-block">
+                Browse problems <i class="fas fa-arrow-right ml-1"></i>
+            </a>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+async function uncomplete(problemId, difficulty) {
+    try {
+        const response = await fetch(`/problems/${problemId}/complete`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            // Remove the element with animation
+            const element = document.getElementById(`problem-${problemId}`);
+            element.style.opacity = '0';
+            element.style.transform = 'translateX(20px)';
+            
+            setTimeout(() => {
+                element.remove();
+                
+                // Update stats
+                const totalEl = document.getElementById('stat-total');
+                const diffEl = document.getElementById(`stat-${difficulty.toLowerCase()}`);
+                const total = parseInt(totalEl.textContent) - 1;
+                const diffCount = parseInt(diffEl.textContent) - 1;
+                totalEl.textContent = total;
+                diffEl.textContent = diffCount;
+                
+                // Update progress bar
+                const progressBar = document.getElementById('progress-bar');
+                const totalProblems = {{ total_problems }};
+                progressBar.style.width = `${(total / totalProblems) * 100}%`;
+                document.getElementById('progress-text').textContent = `${total} / ${totalProblems} problems`;
+                
+                // Show empty state if no more problems
+                const list = document.getElementById('completed-list');
+                if (list && list.children.length === 0) {
+                    list.innerHTML = `
+                        <div class="text-center py-8 text-gray-500 dark:text-gray-400">
+                            <i class="fas fa-clipboard-list text-4xl mb-3"></i>
+                            <p>No completed problems yet.</p>
+                            <a href="/" class="text-blue-600 hover:text-blue-700 dark:text-blue-400 mt-2 inline-block">
+                                Browse problems <i class="fas fa-arrow-right ml-1"></i>
+                            </a>
+                        </div>
+                    `;
+                }
+            }, 300);
+        } else {
+            alert('Failed to update');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+</script>
+{% endblock %}

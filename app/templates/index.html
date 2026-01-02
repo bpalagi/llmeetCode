@@ -2,65 +2,84 @@
 
 {% block content %}
 <div class="mb-8">
-    <h2 class="text-2xl font-bold text-gray-900 mb-2">Coding Challenges</h2>
-    <p class="text-gray-600">Practice real-world coding problems in a professional development environment</p>
+    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Coding Challenges</h2>
+    <p class="text-gray-600 dark:text-gray-400">Practice real-world coding problems in a professional development environment</p>
 </div>
 
 <!-- Filters -->
-<div class="bg-white rounded-lg shadow-sm p-4 mb-6">
-    <div class="flex flex-wrap gap-4">
-        <select class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option>All Difficulties</option>
-            <option>Easy</option>
-            <option>Medium</option>
-            <option>Hard</option>
+<div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-6">
+    <div class="flex flex-wrap gap-4 items-center">
+        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty=${this.value}&topic={{ selected_topic }}&language={{ selected_language }}&hide_completed={{ hide_completed }}`">
+            <option value="All Difficulties" {% if selected_difficulty == 'All Difficulties' %}selected{% endif %}>All Difficulties</option>
+            {% for diff in all_difficulties %}
+            <option value="{{ diff }}" {% if selected_difficulty == diff %}selected{% endif %}>{{ diff }}</option>
+            {% endfor %}
         </select>
-        <select class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option>All Topics</option>
-            <option>Array</option>
-            <option>String</option>
-            <option>Tree</option>
-            <option>Dynamic Programming</option>
+        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic=${this.value}&language={{ selected_language }}&hide_completed={{ hide_completed }}`">
+            <option value="All Topics" {% if selected_topic == 'All Topics' %}selected{% endif %}>All Topics</option>
+            {% for topic in all_topics %}
+            <option value="{{ topic }}" {% if selected_topic == topic %}selected{% endif %}>{{ topic }}</option>
+            {% endfor %}
         </select>
-        <select class="px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500">
-            <option>All Languages</option>
-            <option>Python</option>
-            <option>JavaScript</option>
-            <option>Java</option>
+        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic={{ selected_topic }}&language=${this.value}&hide_completed={{ hide_completed }}`">
+            <option value="All Languages" {% if selected_language == 'All Languages' %}selected{% endif %}>All Languages</option>
+            {% for lang in all_languages %}
+            <option value="{{ lang }}" {% if selected_language == lang %}selected{% endif %}>{{ lang }}</option>
+            {% endfor %}
         </select>
+        {% if logged_in %}
+        <label class="flex items-center gap-2 cursor-pointer ml-auto">
+            <span class="text-sm text-gray-600 dark:text-gray-400">Hide completed</span>
+            <input type="checkbox" 
+                {% if hide_completed == "true" %}checked{% endif %}
+                onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic={{ selected_topic }}&language={{ selected_language }}&hide_completed=${this.checked}`"
+                class="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500">
+        </label>
+        {% endif %}
     </div>
 </div>
 
 <!-- Problem List -->
 <div class="grid gap-4">
     {% for problem in problems %}
-    <div class="problem-card bg-white rounded-lg shadow-sm p-6 difficulty-{{ problem.difficulty.lower() }}">
+    <div class="problem-card bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 difficulty-{{ problem.difficulty.lower() }}">
         <div class="flex items-start justify-between">
             <div class="flex-1">
                 <div class="flex items-center gap-3 mb-2">
-                    <h3 class="text-lg font-semibold text-gray-900">{{ problem.title }}</h3>
+                    {% if problem.id in completed_ids %}
+                    <i class="fas fa-check-circle text-green-500"></i>
+                    {% endif %}
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ problem.title }}</h3>
                     <span class="px-2 py-1 text-xs font-medium rounded-full
-                        {% if problem.difficulty == 'Easy' %}bg-green-100 text-green-800
-                        {% elif problem.difficulty == 'Medium' %}bg-yellow-100 text-yellow-800
-                        {% else %}bg-red-100 text-red-800{% endif %}">
+                        {% if problem.difficulty == 'Easy' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                        {% elif problem.difficulty == 'Medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
+                        {% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">
                         {{ problem.difficulty }}
                     </span>
                 </div>
-                <p class="text-gray-600 mb-3">{{ problem.description }}</p>
-                <div class="flex items-center gap-4 text-sm text-gray-500">
+                <p class="text-gray-600 dark:text-gray-400 mb-3">{{ problem.description }}</p>
+                <div class="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                     <span><i class="fas fa-code mr-1"></i>{{ problem.language }}</span>
                     {% for topic in problem.topics %}
-                    <span class="px-2 py-1 bg-gray-100 rounded">{{ topic }}</span>
+                    <span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded">{{ topic }}</span>
                     {% endfor %}
                 </div>
             </div>
-            <div class="ml-4">
+            <div class="ml-4 flex flex-col gap-2">
                 <button 
                     onclick="openCodespace('{{ problem.id }}')"
                     class="bg-blue-600 text-white px-4 py-2 rounded-md font-medium hover:bg-blue-700 transition flex items-center gap-2">
                     <i class="fab fa-github"></i>
                     Open in Codespaces
                 </button>
+                {% if logged_in %}
+                <button 
+                    onclick="toggleComplete('{{ problem.id }}', {{ 'true' if problem.id in completed_ids else 'false' }})"
+                    class="{% if problem.id in completed_ids %}bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %} px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center">
+                    <i class="fas {% if problem.id in completed_ids %}fa-check-circle{% else %}fa-circle{% endif %}"></i>
+                    {% if problem.id in completed_ids %}Completed{% else %}Mark Complete{% endif %}
+                </button>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -68,12 +87,12 @@
 </div>
 
 {% if not logged_in %}
-<div class="mt-8 bg-blue-50 border border-blue-200 rounded-lg p-6">
+<div class="mt-8 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-6">
     <div class="flex items-center">
-        <i class="fas fa-info-circle text-blue-600 text-xl mr-3"></i>
+        <i class="fas fa-info-circle text-blue-600 dark:text-blue-400 text-xl mr-3"></i>
         <div>
-            <h3 class="font-semibold text-blue-900 mb-1">GitHub Login Required</h3>
-            <p class="text-blue-700 text-sm">You need to login with GitHub to create Codespaces. Each Codespace is a temporary, isolated development environment.</p>
+            <h3 class="font-semibold text-blue-900 dark:text-blue-100 mb-1">GitHub Login Required</h3>
+            <p class="text-blue-700 dark:text-blue-300 text-sm">You need to login with GitHub to create Codespaces. Each Codespace is a temporary, isolated development environment.</p>
         </div>
     </div>
 </div>

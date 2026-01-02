@@ -27,4 +27,6 @@ htmlcov/
 .env
 .env.local
 
-.plan.md
+plan.md
+test.db
+test_init.db

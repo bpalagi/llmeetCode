@@ -12,9 +12,13 @@ A modern coding interview platform that provides browser-based development envir
 ## Quick Start
 
 
-2. Create a virtual environment:
+1. Create a virtual environment:
 ```bash
 python -m venv venv
+```
+
+2. Activate the virtual environment:
+```bash
 source venv/bin/activate
 ```
 
@@ -31,16 +35,22 @@ cp .env.example .env
 
 5. Run the application:
 ```bash
-python app/main.py
+python -m app.main
 ```
 
 The app will be available at `http://localhost:8000`
+
+### Running Tests
+
+```bash
+./run_tests.sh
+```
 
 ### GitHub OAuth Setup
 
 1. Go to GitHub Settings > Developer settings > OAuth Apps
 2. Create a new OAuth App with:
-   - **Application name**: LLMeet (or your preferred name)
+   - **Application name**: LLMeetCode (or your preferred name)
    - **Homepage URL**: `http://localhost:8000`
    - **Authorization callback URL**: `http://localhost:8000/auth/callback`
 3. Note the Client ID and generate a Client Secret
@@ -69,33 +79,4 @@ Example devcontainer.json:
     }
 }
 ```
-
-## API Endpoints
-
-- `GET /` - Home page with problem list
-- `GET /auth/login` - Redirect to GitHub OAuth
-- `GET /auth/callback` - OAuth callback handler
-- `POST /codespaces/create` - Create a new codespace
-- `GET /auth/logout` - Clear session and logout
-
-## Security Notes
-
-- Session tokens are encrypted and expire after 1 hour
-- GitHub access tokens are stored only in the session, not in a database
-- In production, use HTTPS and set `secure=True` for cookies
-- The `codespace` OAuth scope is required for creating codespaces
-
-## Development
-
-### Running in Development Mode
-
-```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-```
-
-### Adding New Problems
-
-1. Update the `SAMPLE_PROBLEMS` list in `app/main.py`
-2. Create corresponding problem files in your template repository
-3. Ensure the problem ID matches between the web app and template
 

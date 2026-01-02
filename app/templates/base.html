@@ -3,8 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}LLMeet - Coding Interview Platform{% endblock %}</title>
+    <title>{% block title %}LLMeetCode - Coding Interview Platform{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         .problem-card {
@@ -16,27 +22,54 @@
         .difficulty-easy { border-left: 4px solid #10b981; }
         .difficulty-medium { border-left: 4px solid #f59e0b; }
         .difficulty-hard { border-left: 4px solid #ef4444; }
+        
+        /* Sticky footer styles */
+        html, body {
+            height: 100%;
+        }
+        body {
+            display: flex;
+            flex-direction: column;
+        }
+        main {
+            flex: 1 0 auto;
+        }
+        footer {
+            flex-shrink: 0;
+        }
+        
+        /* Dark mode transitions */
+        * {
+            transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+        }
     </style>
 </head>
-<body class="bg-gray-50" data-logged-in="{{ 'true' if logged_in else 'false' }}">
+<body class="bg-gray-50 dark:bg-gray-900" data-logged-in="{{ 'true' if logged_in else 'false' }}">
     <!-- Navigation -->
-    <nav class="bg-white shadow-sm border-b">
+    <nav class="bg-white dark:bg-gray-800 shadow-sm border-b dark:border-gray-700">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex justify-between h-16">
                 <div class="flex items-center">
-                    <h1 class="text-xl font-bold text-gray-900">
-                        <i class="fas fa-code text-blue-600 mr-2"></i>
-                        LLMeet
-                    </h1>
+                    <a href="/" class="text-xl font-bold text-gray-900 dark:text-white hover:text-blue-600 dark:hover:text-blue-400 transition">
+                        <i class="fas fa-code text-blue-600 dark:text-blue-400 mr-2"></i>
+                        LLMeetCode
+                    </a>
                 </div>
                 <div class="flex items-center space-x-4">
+                    <!-- Dark mode toggle -->
+                    <button id="darkModeToggle" class="p-2 rounded-lg text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-700 transition">
+                        <i class="fas fa-moon dark:hidden"></i>
+                        <i class="fas fa-sun hidden dark:inline"></i>
+                    </button>
                     {% if logged_in %}
                         <div class="flex items-center space-x-3">
-                            {% if user.avatar_url %}
-                                <img src="{{ user.avatar_url }}" alt="Avatar" class="w-8 h-8 rounded-full">
-                            {% endif %}
-                            <span class="text-sm text-gray-700">{{ user.name or user.login }}</span>
-                            <a href="/auth/logout" class="text-sm text-gray-500 hover:text-gray-700">
+                            <a href="/dashboard" class="flex items-center space-x-2 hover:opacity-80 transition">
+                                {% if user.avatar_url %}
+                                    <img src="{{ user.avatar_url }}" alt="Avatar" class="w-8 h-8 rounded-full">
+                                {% endif %}
+                                <span class="text-sm text-gray-700 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400">{{ user.name or user.login }}</span>
+                            </a>
+                            <a href="/auth/logout" class="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
                                 <i class="fas fa-sign-out-alt"></i> Logout
                             </a>
                         </div>
@@ -56,35 +89,56 @@
     </main>
 
     <!-- Footer -->
-    <footer class="bg-white border-t mt-12">
+    <footer class="bg-white dark:bg-gray-800 border-t dark:border-gray-700 mt-12">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <p class="text-center text-sm text-gray-500">
+            <p class="text-center text-sm text-gray-500 dark:text-gray-400">
                 Powered by GitHub Codespaces • Built with FastAPI
             </p>
         </div>
     </footer>
 
     <!-- Loading Modal -->
-    <div id="loadingModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-        <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+    <div id="loadingModal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+        <div class="bg-white dark:bg-gray-800 rounded-lg p-8 max-w-sm w-full mx-4">
             <div class="text-center">
                 <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-                <p class="mt-4 text-gray-700">Creating your Codespace...</p>
-                <p class="text-sm text-gray-500 mt-2">This usually takes 20-30 seconds</p>
+                <p class="mt-4 loading-text text-gray-700 dark:text-gray-300">Loading...</p>
+                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">This usually takes 20-30 seconds</p>
             </div>
         </div>
     </div>
 
     <script>
         // Show loading modal
-        function showLoading() {
-            document.getElementById('loadingModal').classList.remove('hidden');
+        function showLoading(message = 'Loading...') {
+            const modal = document.getElementById('loadingModal');
+            const text = modal.querySelector('.loading-text');
+            if (text) {
+                text.textContent = message;
+            }
+            modal.classList.remove('hidden');
         }
 
         // Hide loading modal
         function hideLoading() {
             document.getElementById('loadingModal').classList.add('hidden');
         }
+
+        // Dark mode toggle
+        const darkModeToggle = document.getElementById('darkModeToggle');
+        const html = document.documentElement;
+        
+        // Check for saved theme preference or default to light
+        const currentTheme = localStorage.getItem('theme') || 'light';
+        if (currentTheme === 'dark') {
+            html.classList.add('dark');
+        }
+        
+        darkModeToggle.addEventListener('click', () => {
+            html.classList.toggle('dark');
+            const theme = html.classList.contains('dark') ? 'dark' : 'light';
+            localStorage.setItem('theme', theme);
+        });
 
         // Create codespace and redirect
         async function openCodespace(problemId) {
@@ -96,7 +150,7 @@
                 return;
             }
 
-            showLoading();
+            showLoading('Creating your Codespace...');
 
             try {
                 const response = await fetch('/codespaces/create', {
@@ -116,10 +170,34 @@
                 }
 
                 const data = await response.json();
-                window.location.href = data.url;
+                
+                // Navigate to codespace immediately
+                if (data.web_url) {
+                    window.location.href = data.web_url;
+                } else {
+                    throw new Error('No codespace URL received');
+                }
             } catch (error) {
                 hideLoading();
                 alert('Error creating codespace: ' + error.message);
+            }
+        }
+
+        // Toggle problem completion status
+        async function toggleComplete(problemId, isCompleted) {
+            try {
+                const response = await fetch(`/problems/${problemId}/complete`, {
+                    method: isCompleted ? 'DELETE' : 'POST'
+                });
+
+                if (response.ok) {
+                    window.location.reload();
+                } else {
+                    const error = await response.json();
+                    alert('Failed to update: ' + (error.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                alert('Error: ' + error.message);
             }
         }
     </script>

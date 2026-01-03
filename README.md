@@ -149,4 +149,3 @@ The project is configured for automatic deployment to Render when pushing to the
 ### Manual Deployment
 
 If auto-deploy is disabled, you can trigger deployments manually from the Render dashboard.
-

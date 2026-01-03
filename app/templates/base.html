@@ -22,7 +22,7 @@
         .difficulty-easy { border-left: 4px solid #10b981; }
         .difficulty-medium { border-left: 4px solid #f59e0b; }
         .difficulty-hard { border-left: 4px solid #ef4444; }
-        
+
         /* Sticky footer styles */
         html, body {
             height: 100%;
@@ -37,7 +37,7 @@
         footer {
             flex-shrink: 0;
         }
-        
+
         /* Dark mode transitions */
         * {
             transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
@@ -127,13 +127,13 @@
         // Dark mode toggle
         const darkModeToggle = document.getElementById('darkModeToggle');
         const html = document.documentElement;
-        
+
         // Check for saved theme preference or default to light
         const currentTheme = localStorage.getItem('theme') || 'light';
         if (currentTheme === 'dark') {
             html.classList.add('dark');
         }
-        
+
         darkModeToggle.addEventListener('click', () => {
             html.classList.toggle('dark');
             const theme = html.classList.contains('dark') ? 'dark' : 'light';
@@ -144,7 +144,7 @@
         async function openCodespace(problemId) {
             // Check login status from body data attribute
             const isLoggedIn = document.body.dataset.loggedIn === 'true';
-            
+
             if (!isLoggedIn) {
                 window.location.href = '/auth/login';
                 return;
@@ -170,7 +170,7 @@
                 }
 
                 const data = await response.json();
-                
+
                 // Navigate to codespace immediately
                 if (data.web_url) {
                     window.location.href = data.web_url;

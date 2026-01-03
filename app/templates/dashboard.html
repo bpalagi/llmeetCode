@@ -55,7 +55,7 @@
             <i class="fas fa-check-circle text-green-500 mr-2"></i>
             Completed Problems
         </h3>
-        
+
         {% if completed_problems %}
         <div class="space-y-3" id="completed-list">
             {% for problem in completed_problems %}
@@ -76,7 +76,7 @@
                     <span class="text-sm text-gray-500 dark:text-gray-400">
                         {{ problem.completed_at.strftime('%b %d, %Y') }}
                     </span>
-                    <button onclick="uncomplete('{{ problem.id }}', '{{ problem.difficulty }}')" 
+                    <button onclick="uncomplete('{{ problem.id }}', '{{ problem.difficulty }}')"
                         class="text-gray-400 hover:text-red-500 transition" title="Remove completion">
                         <i class="fas fa-times"></i>
                     </button>
@@ -102,16 +102,16 @@ async function uncomplete(problemId, difficulty) {
         const response = await fetch(`/problems/${problemId}/complete`, {
             method: 'DELETE'
         });
-        
+
         if (response.ok) {
             // Remove the element with animation
             const element = document.getElementById(`problem-${problemId}`);
             element.style.opacity = '0';
             element.style.transform = 'translateX(20px)';
-            
+
             setTimeout(() => {
                 element.remove();
-                
+
                 // Update stats
                 const totalEl = document.getElementById('stat-total');
                 const diffEl = document.getElementById(`stat-${difficulty.toLowerCase()}`);
@@ -119,13 +119,13 @@ async function uncomplete(problemId, difficulty) {
                 const diffCount = parseInt(diffEl.textContent) - 1;
                 totalEl.textContent = total;
                 diffEl.textContent = diffCount;
-                
+
                 // Update progress bar
                 const progressBar = document.getElementById('progress-bar');
                 const totalProblems = {{ total_problems }};
                 progressBar.style.width = `${(total / totalProblems) * 100}%`;
                 document.getElementById('progress-text').textContent = `${total} / ${totalProblems} problems`;
-                
+
                 // Show empty state if no more problems
                 const list = document.getElementById('completed-list');
                 if (list && list.children.length === 0) {

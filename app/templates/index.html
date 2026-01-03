@@ -30,7 +30,7 @@
         {% if logged_in %}
         <label class="flex items-center gap-2 cursor-pointer ml-auto">
             <span class="text-sm text-gray-600 dark:text-gray-400">Hide completed</span>
-            <input type="checkbox" 
+            <input type="checkbox"
                 {% if hide_completed == "true" %}checked{% endif %}
                 onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic={{ selected_topic }}&language={{ selected_language }}&hide_completed=${this.checked}`"
                 class="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500">
@@ -66,14 +66,14 @@
                 </div>
             </div>
             <div class="ml-4 flex flex-col gap-2">
-                <button 
+                <button
                     onclick="openCodespace('{{ problem.id }}')"
                     class="bg-blue-600 text-white px-4 py-2 rounded-md font-medium hover:bg-blue-700 transition flex items-center gap-2">
                     <i class="fab fa-github"></i>
                     Open in Codespaces
                 </button>
                 {% if logged_in %}
-                <button 
+                <button
                     onclick="toggleComplete('{{ problem.id }}', {{ 'true' if problem.id in completed_ids else 'false' }})"
                     class="{% if problem.id in completed_ids %}bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %} px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center">
                     <i class="fas {% if problem.id in completed_ids %}fa-check-circle{% else %}fa-circle{% endif %}"></i>

@@ -1,10 +1,8 @@
-Deploy to render.
-
-Raise test coverage
+Add pre-commit linter, formatter
+* why is there a SQLite database in test? can we utilize postgresql for testing?
+* why are 4 tests skipped?
 
 Look at getting a more wholistic example setup
-
-Figure out how this could be deployed to avoid needing to run on a local machine.
 
 Enable a user to rejoin a codespace after it's been created
 * save the link to the codespace in the database rather than spinning up a new one each time

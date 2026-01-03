@@ -5,24 +5,27 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 import httpx
 import os
-from typing import Optional, Dict, Any, List
+from datetime import datetime, timezone
+from typing import Optional, Dict, Any
 import secrets
 from itsdangerous import URLSafeTimedSerializer, BadSignature
-import asyncio
 from dotenv import load_dotenv
 from sqlalchemy.orm import Session
+from contextlib import asynccontextmanager
 
 from .database import get_db, init_db, User, CompletedProblem
 
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(title="LLMeetCode - Coding Interview Platform")
-
-# Initialize database on startup
-@app.on_event("startup")
-def startup_event():
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
     init_db()
+    yield
+    # Shutdown
+
+app = FastAPI(title="LLMeetCode - Coding Interview Platform", lifespan=lifespan)
 
 # Configuration
 GITHUB_CLIENT_ID = os.getenv("GITHUB_CLIENT_ID")
@@ -485,7 +488,6 @@ async def unmark_complete(problem_id: str, request: Request, db: Session = Depen
     db.commit()
     
     return JSONResponse({"status": "removed"})
-    return response
 
 if __name__ == "__main__":
     import uvicorn

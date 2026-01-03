@@ -1,6 +1,5 @@
 import pytest
 import os
-from unittest.mock import MagicMock, AsyncMock
 from fastapi.testclient import TestClient
 
 # Set environment variables BEFORE importing app
@@ -9,6 +8,7 @@ os.environ["GITHUB_CLIENT_SECRET"] = "test_client_secret"
 os.environ["GITHUB_REDIRECT_URI"] = "http://localhost:8000/auth/callback"
 os.environ["SECRET_KEY"] = "test-secret-key"
 os.environ["TEMPLATE_REPO"] = "test/repo"
+os.environ["DATABASE_URL"] = "sqlite:///./test.db"
 
 # Now import app after setting environment variables
 from app.main import app
@@ -17,14 +17,6 @@ from app.main import app
 def client():
     """Create a test client"""
     return TestClient(app)
-
-@pytest.fixture
-def mock_httpx():
-    """Create a mock for httpx.AsyncClient"""
-    mock_client = AsyncMock()
-    mock_client.post = AsyncMock()
-    mock_client.get = AsyncMock()
-    return mock_client
 
 @pytest.fixture
 def authenticated_client():
@@ -37,7 +29,15 @@ def authenticated_client():
     return test_client
 
 @pytest.fixture
-def valid_session_token():
-    """Create a valid session token for testing"""
-    from app.main import serializer
-    return serializer.dumps({"access_token": "test_token", "user": {"id": 12345}})
+def db_session():
+    """Create a test database session"""
+    from app.database import SessionLocal, Base, engine
+    Base.metadata.create_all(bind=engine)
+    session = SessionLocal()
+    try:
+        yield session
+    finally:
+        session.close()
+        # Clean up database after test
+        Base.metadata.drop_all(bind=engine)
+        Base.metadata.create_all(bind=engine)

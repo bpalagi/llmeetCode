@@ -11,6 +11,28 @@ A modern coding interview platform that provides browser-based development envir
 
 ## Quick Start
 
+### Prerequisites
+
+- Python 3.11+
+- PostgreSQL
+
+**Install PostgreSQL (macOS):**
+```bash
+brew install postgresql@15
+brew services start postgresql@15
+```
+
+**Create the database:**
+```bash
+createdb llmeetcode
+```
+
+**Stop PostgreSQL (when not needed):**
+```bash
+brew services stop postgresql@15
+```
+
+### Setup
 
 1. Create a virtual environment:
 ```bash

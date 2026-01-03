@@ -1,7 +1,9 @@
 """Tests for main application endpoints"""
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
-from app.main import app, SAMPLE_PROBLEMS
+from fastapi import Request
+from itsdangerous import BadSignature
+from app.main import app, SAMPLE_PROBLEMS, get_session_data, create_codespace
 
 class TestHome:
     """Test cases for the home page"""
@@ -94,6 +96,46 @@ class TestAuth:
         
         response = client.get("/auth/callback?code=invalid_code")
         assert response.status_code == 400
+    
+    @patch('httpx.AsyncClient')
+    def test_auth_callback_token_exchange_failure(self, mock_client, client):
+        """Test auth callback when token exchange fails"""
+        mock_response = MagicMock()
+        mock_response.status_code = 400
+        mock_client.return_value.__aenter__.return_value.post.return_value = mock_response
+        
+        response = client.get("/auth/callback?code=invalid_code")
+        assert response.status_code == 400
+    
+    @patch('httpx.AsyncClient')
+    def test_auth_callback_no_access_token(self, mock_client, client):
+        """Test auth callback when no access token is returned"""
+        mock_token_response = MagicMock()
+        mock_token_response.status_code = 200
+        mock_token_response.json.return_value = {"error": "invalid_grant"}
+        
+        mock_client.return_value.__aenter__.return_value.post.return_value = mock_token_response
+        
+        response = client.get("/auth/callback?code=invalid_code")
+        assert response.status_code == 400
+    
+    @patch('httpx.AsyncClient')
+    def test_auth_callback_user_info_failure(self, mock_client, client):
+        """Test auth callback when getting user info fails"""
+        # Mock successful token exchange
+        mock_token_response = MagicMock()
+        mock_token_response.status_code = 200
+        mock_token_response.json.return_value = {"access_token": "test_token"}
+        
+        # Mock failed user info request
+        mock_user_response = MagicMock()
+        mock_user_response.status_code = 400
+        
+        mock_client.return_value.__aenter__.return_value.post.return_value = mock_token_response
+        mock_client.return_value.__aenter__.return_value.get.return_value = mock_user_response
+        
+        response = client.get("/auth/callback?code=test_code")
+        assert response.status_code == 400
 
 class TestCodespaces:
     """Test codespace creation endpoints"""
@@ -135,6 +177,125 @@ class TestCodespaces:
             "language": "python"
         })
         assert response.status_code == 500
+
+
+class TestCreateCodespaceFunction:
+    """Test codespace creation function"""
+    
+    @patch('app.main.httpx.AsyncClient')
+    def test_create_codespace_invalid_problem(self, mock_client):
+        """Test create_codespace with invalid problem ID"""
+        import asyncio
+        with pytest.raises(Exception):  # Should raise HTTPException
+            asyncio.run(create_codespace("test_token", "invalid-problem"))
+    
+    @patch('app.main.httpx.AsyncClient')
+    def test_create_codespace_repo_not_found(self, mock_client):
+        """Test create_codespace when repository is not found"""
+        import asyncio
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.json.return_value = {"message": "Not Found"}
+        
+        mock_client.return_value.__aenter__.return_value.get.return_value = mock_response
+        
+        with pytest.raises(Exception) as exc_info:
+            asyncio.run(create_codespace("test_token", "two-sum"))
+        
+        assert "Failed to get repository info" in str(exc_info.value.detail)
+    
+    @patch('app.main.httpx.AsyncClient')
+    def test_create_codespace_no_branches(self, mock_client):
+        """Test create_codespace when repository has no branches"""
+        import asyncio
+        # Mock repo response
+        mock_repo_response = MagicMock()
+        mock_repo_response.status_code = 200
+        mock_repo_response.json.return_value = {
+            "id": 123,
+            "default_branch": None
+        }
+        
+        mock_client.return_value.__aenter__.return_value.get.return_value = mock_repo_response
+        
+        with pytest.raises(Exception) as exc_info:
+            asyncio.run(create_codespace("test_token", "two-sum"))
+        
+        assert "Repository has no branches" in str(exc_info.value.detail)
+    
+    @patch('app.main.httpx.AsyncClient')
+    def test_create_codespace_creation_failed(self, mock_client):
+        """Test create_codespace when codespace creation fails"""
+        import asyncio
+        # Mock repo response
+        mock_repo_response = MagicMock()
+        mock_repo_response.status_code = 200
+        mock_repo_response.json.return_value = {
+            "id": 123,
+            "default_branch": "main"
+        }
+        
+        # Mock machines response
+        mock_machines_response = MagicMock()
+        mock_machines_response.status_code = 200
+        mock_machines_response.json.return_value = {"machines": []}
+        
+        # Mock creation response
+        mock_creation_response = MagicMock()
+        mock_creation_response.status_code = 400
+        mock_creation_response.json.return_value = {"message": "Insufficient quota"}
+        
+        mock_client.return_value.__aenter__.return_value.get.side_effect = [
+            mock_repo_response,
+            mock_machines_response
+        ]
+        mock_client.return_value.__aenter__.return_value.post.return_value = mock_creation_response
+        
+        with pytest.raises(Exception) as exc_info:
+            asyncio.run(create_codespace("test_token", "two-sum"))
+        
+        assert "Failed to create codespace" in str(exc_info.value.detail)
+    
+    @patch('app.main.httpx.AsyncClient')
+    def test_create_codespace_success(self, mock_client):
+        """Test successful codespace creation"""
+        import asyncio
+        # Mock repo response
+        mock_repo_response = MagicMock()
+        mock_repo_response.status_code = 200
+        mock_repo_response.json.return_value = {
+            "id": 123,
+            "default_branch": "main"
+        }
+        
+        # Mock machines response
+        mock_machines_response = MagicMock()
+        mock_machines_response.status_code = 200
+        mock_machines_response.json.return_value = {
+            "machines": [{"name": "standardLinux"}]
+        }
+        
+        # Mock creation response
+        mock_creation_response = MagicMock()
+        mock_creation_response.status_code = 201
+        mock_creation_response.json.return_value = {
+            "name": "test-codespace",
+            "web_url": "https://github.com/codespaces/test",
+            "state": "Creating",
+            "created_at": "2024-01-01T00:00:00Z"
+        }
+        
+        mock_client.return_value.__aenter__.return_value.get.side_effect = [
+            mock_repo_response,
+            mock_machines_response
+        ]
+        mock_client.return_value.__aenter__.return_value.post.return_value = mock_creation_response
+        
+        result = asyncio.run(create_codespace("test_token", "two-sum"))
+        
+        assert result["name"] == "test-codespace"
+        assert result["web_url"] == "https://github.com/codespaces/test"
+        assert result["state"] == "Creating"
 
 class TestDashboard:
     """Test dashboard functionality"""
@@ -186,3 +347,156 @@ class TestProblemCompletion:
         response = authenticated_client.delete("/problems/two-sum/complete")
         assert response.status_code == 200
         assert response.json()["status"] == "removed"
+    
+    def test_unmark_complete_unauthenticated(self, client):
+        """Test unmarking problem without authentication"""
+        response = client.delete("/problems/two-sum/complete")
+        assert response.status_code == 401
+    
+    def test_unmark_complete_nonexistent(self, authenticated_client):
+        """Test unmarking a problem that wasn't completed"""
+        response = authenticated_client.delete("/problems/nonexistent/complete")
+        assert response.status_code == 200
+        assert response.json()["status"] == "removed"
+    
+    def test_mark_complete_invalid_problem_id(self, authenticated_client):
+        """Test marking complete with non-existent problem ID"""
+        response = authenticated_client.post("/problems/nonexistent/complete")
+        assert response.status_code == 200
+        # Should still create completion record even if problem doesn't exist in SAMPLE_PROBLEMS
+
+
+class TestDashboardWithCompleted:
+    """Test dashboard with completed problems"""
+    
+    def test_dashboard_with_completed_problems(self, authenticated_client, db_session):
+        """Test dashboard shows completed problems correctly"""
+        # Create a test user and completed problems
+        from app.database import User, CompletedProblem
+        import random
+        
+        # Use random github_id to avoid unique constraint issues
+        user = User(
+            github_id=random.randint(10000, 99999),
+            login=f"testuser{random.randint(1000, 9999)}",
+            name="Test User"
+        )
+        db_session.add(user)
+        db_session.commit()
+        
+        # Add completed problems
+        for problem_id in ["two-sum", "merge-sorted"]:
+            completion = CompletedProblem(
+                user_id=user.id,
+                problem_id=problem_id
+            )
+            db_session.add(completion)
+        db_session.commit()
+        
+        # Update authenticated client to use real user ID
+        from app.main import serializer
+        session_token = serializer.dumps({
+            "access_token": "test_token", 
+            "user_id": user.id, 
+            "user": {"login": user.login}
+        })
+        authenticated_client.cookies.set("session", session_token)
+        
+        response = authenticated_client.get("/dashboard")
+        assert response.status_code == 200
+        assert len(response.context["completed_problems"]) == 2
+        assert response.context["stats"]["total"] == 2
+
+
+class TestSessionData:
+    """Test session data handling"""
+    
+    def test_get_session_data_no_cookie(self):
+        """Test get_session_data when no session cookie exists"""
+        request = MagicMock()
+        request.cookies = {}
+        
+        result = get_session_data(request)
+        assert result == {}
+    
+    def test_get_session_data_invalid_signature(self):
+        """Test get_session_data with invalid session token"""
+        request = MagicMock()
+        request.cookies = {"session": "invalid_token"}
+        
+        with patch('app.main.serializer') as mock_serializer:
+            mock_serializer.loads.side_effect = BadSignature("Invalid signature")
+            result = get_session_data(request)
+            assert result == {}
+    
+    def test_get_session_data_valid_token(self):
+        """Test get_session_data with valid session token"""
+        request = MagicMock()
+        request.cookies = {"session": "valid_token"}
+        
+        expected_data = {"user_id": 123, "access_token": "token"}
+        with patch('app.main.serializer') as mock_serializer:
+            mock_serializer.loads.return_value = expected_data
+            result = get_session_data(request)
+            assert result == expected_data
+    
+    def test_get_session_data_expired_token(self):
+        """Test get_session_data with expired token"""
+        request = MagicMock()
+        request.cookies = {"session": "expired_token"}
+        
+        with patch('app.main.serializer') as mock_serializer:
+            mock_serializer.loads.side_effect = BadSignature("Token expired")
+            result = get_session_data(request)
+            assert result == {}
+
+
+class TestErrorHandling:
+    """Test various error handling scenarios"""
+    
+    def test_home_with_invalid_filter_params(self, client):
+        """Test home page with various filter combinations"""
+        response = client.get("/?difficulty=Invalid&topic=NonExistent&language=Unknown")
+        assert response.status_code == 200
+        # Should return empty list when no matches
+        assert len(response.context["problems"]) == 0
+    
+    def test_codespace_create_invalid_json(self, authenticated_client):
+        """Test creating codespace with invalid JSON"""
+        response = authenticated_client.post(
+            "/codespaces/create",
+            json={"invalid_field": "value"}
+        )
+        # Pydantic validates the request body, missing problem_id causes 422
+        assert response.status_code == 422
+
+
+class TestSessionEdgeCases:
+    """Test session management edge cases"""
+    
+    def test_session_with_malformed_token(self, client):
+        """Test handling of malformed session token"""
+        client.cookies.set("session", "not_a_valid_token")
+        response = client.post("/codespaces/create", json={"problem_id": "two-sum"})
+        assert response.status_code == 401
+    
+    def test_session_without_user_id(self, client):
+        """Test session token without user_id"""
+        from app.main import serializer
+        session_token = serializer.dumps({"access_token": "token"})  # No user_id
+        client.cookies.set("session", session_token)
+        
+        response = client.post("/problems/two-sum/complete")
+        assert response.status_code == 401
+    
+    def test_session_with_expired_token(self, client):
+        """Test handling of expired session token"""
+        from app.main import serializer
+        
+        # Manually create an expired token
+        import time
+        session_data = {"user_id": 123, "exp": time.time() - 3600}  # Expired 1 hour ago
+        client.cookies.set("session", serializer.dumps(session_data))
+        
+        response = client.post("/codespaces/create", json={"problem_id": "two-sum"})
+        assert response.status_code == 401

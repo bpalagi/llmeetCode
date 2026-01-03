@@ -220,6 +220,120 @@ async def create_codespace(access_token: str, problem_id: str) -> dict:
         }
 
 
+async def list_user_codespaces(
+    access_token: str, problem_id: str | None = None
+) -> list[dict]:
+    """List user's GitHub Codespaces created by llmeetcode.
+
+    Args:
+        access_token: GitHub OAuth access token
+        problem_id: Optional problem ID to filter by
+
+    Returns:
+        List of codespace dicts with: name, web_url, state, display_name,
+        created_at, last_used_at, problem_id (extracted from display_name)
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://api.github.com/user/codespaces",
+            headers=headers,
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to list codespaces: {response.json().get('message', 'Unknown error')}",
+            )
+
+        data = response.json()
+        codespaces = data.get("codespaces", [])
+
+        # Filter to only llmeetcode codespaces
+        llmeetcode_codespaces = []
+        for cs in codespaces:
+            display_name = cs.get("display_name", "")
+            if not display_name.startswith("llmeetcode-"):
+                continue
+
+            # Extract problem_id from display_name: "llmeetcode-{problem_id}-{8_char_hex}"
+            parts = display_name.split("-")
+            # parts[0] = "llmeetcode", parts[1:-1] = problem_id parts, parts[-1] = hex
+            extracted_problem_id = "-".join(parts[1:-1]) if len(parts) > 2 else ""
+
+            # Filter by problem_id if provided
+            if problem_id and extracted_problem_id != problem_id:
+                continue
+
+            llmeetcode_codespaces.append(
+                {
+                    "name": cs["name"],
+                    "web_url": cs.get(
+                        "web_url", f"https://github.com/codespaces/{cs['name']}"
+                    ),
+                    "state": cs.get("state", "Unknown"),
+                    "display_name": display_name,
+                    "created_at": cs.get("created_at"),
+                    "last_used_at": cs.get("last_used_at"),
+                    "problem_id": extracted_problem_id,
+                }
+            )
+
+        # Sort by last_used_at descending, fall back to created_at
+        llmeetcode_codespaces.sort(
+            key=lambda x: x.get("last_used_at") or x.get("created_at") or "",
+            reverse=True,
+        )
+
+        return llmeetcode_codespaces
+
+
+async def delete_codespace(access_token: str, codespace_name: str) -> bool:
+    """Delete a GitHub Codespace.
+
+    Args:
+        access_token: GitHub OAuth access token
+        codespace_name: The name of the codespace to delete
+
+    Returns:
+        True if deletion was successful
+
+    Raises:
+        HTTPException: If deletion fails
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(
+            f"https://api.github.com/user/codespaces/{codespace_name}",
+            headers=headers,
+        )
+
+        if response.status_code == 202:
+            # 202 Accepted means deletion is in progress
+            return True
+        elif response.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="Codespace not found",
+            )
+        else:
+            error_msg = response.json().get("message", "Unknown error")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to delete codespace: {error_msg}",
+            )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
@@ -237,6 +351,7 @@ async def home(
 
     # Get completed problem IDs for logged in user
     completed_ids = set()
+    active_codespaces = {}  # Maps problem_id -> codespace web_url
     if session and "user_id" in session:
         completed = (
             db.query(CompletedProblem)
@@ -244,6 +359,17 @@ async def home(
             .all()
         )
         completed_ids = {cp.problem_id for cp in completed}
+
+        # Get active codespaces for this user
+        if session.get("access_token"):
+            try:
+                codespaces = await list_user_codespaces(session["access_token"])
+                active_codespaces = {
+                    cs["problem_id"]: cs["web_url"] for cs in codespaces
+                }
+            except Exception:
+                # If fetching codespaces fails, continue without them
+                pass
 
     # Filter problems based on query parameters
     filtered_problems = SAMPLE_PROBLEMS.copy()
@@ -278,6 +404,7 @@ async def home(
             "user": session.get("user"),
             "logged_in": bool(session),
             "completed_ids": completed_ids,
+            "active_codespaces": active_codespaces,
             "hide_completed": "true" if hide_completed_bool else "false",
             "selected_difficulty": difficulty or "All Difficulties",
             "selected_topic": topic or "All Topics",
@@ -407,6 +534,54 @@ async def create_codespace_endpoint(request: CodespaceRequest, http_request: Req
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/codespaces/list")
+async def list_codespaces_endpoint(
+    http_request: Request,
+    problem_id: str | None = None,
+):
+    """List user's llmeetcode codespaces"""
+    session = get_session_data(http_request)
+
+    if not session or "access_token" not in session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return await list_user_codespaces(session["access_token"], problem_id)
+
+
+@app.get("/codespaces/{problem_id}/active")
+async def get_active_codespace(
+    problem_id: str,
+    http_request: Request,
+):
+    """Get the active codespace for a specific problem, if any exists"""
+    session = get_session_data(http_request)
+
+    if not session or "access_token" not in session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    codespaces = await list_user_codespaces(session["access_token"], problem_id)
+
+    if codespaces:
+        return codespaces[0]
+
+    return {"codespace": None}
+
+
+@app.delete("/codespaces/{codespace_name}")
+async def delete_codespace_endpoint(
+    codespace_name: str,
+    http_request: Request,
+):
+    """Delete a codespace by name"""
+    session = get_session_data(http_request)
+
+    if not session or "access_token" not in session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    await delete_codespace(session["access_token"], codespace_name)
+    return JSONResponse({"status": "deleted"})
+
+
 @app.get("/auth/logout")
 async def logout():
     """Clear session and logout"""
@@ -417,7 +592,7 @@ async def logout():
 
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard(request: Request, db: Session = Depends(get_db)):
-    """User dashboard showing completed problems"""
+    """User dashboard showing completed problems and active codespaces"""
     session = get_session_data(request)
 
     if not session or "user_id" not in session:
@@ -448,6 +623,21 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         "hard": len([p for p in completed_problems if p["difficulty"] == "Hard"]),
     }
 
+    # Get active codespaces
+    codespaces = []
+    if session.get("access_token"):
+        try:
+            codespaces = await list_user_codespaces(session["access_token"])
+            # Enrich with problem titles
+            for cs in codespaces:
+                problem = next(
+                    (p for p in SAMPLE_PROBLEMS if p["id"] == cs["problem_id"]), None
+                )
+                cs["problem_title"] = problem["title"] if problem else cs["problem_id"]
+        except Exception:
+            # If fetching codespaces fails, continue without them
+            pass
+
     return templates.TemplateResponse(
         "dashboard.html",
         {
@@ -457,6 +647,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
             "completed_problems": completed_problems,
             "stats": stats,
             "total_problems": len(SAMPLE_PROBLEMS),
+            "codespaces": codespaces,
         },
     )
 

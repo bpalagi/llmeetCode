@@ -1,12 +1,54 @@
 """Tests for main application endpoints"""
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 from itsdangerous import BadSignature
 
-from app.main import SAMPLE_PROBLEMS, create_codespace, get_session_data
+from app.main import (
+    SAMPLE_PROBLEMS,
+    create_codespace,
+    delete_codespace,
+    get_session_data,
+)
+
+# Sample GitHub API response data for mocking codespace tests
+GITHUB_CODESPACES_RESPONSE = {
+    "total_count": 3,
+    "codespaces": [
+        {
+            "name": "urban-space-abc123",
+            "display_name": "llmeetcode-two-sum-abc123",
+            "state": "Available",
+            "web_url": "https://github.com/codespaces/urban-space-abc123",
+            "created_at": "2024-01-01T10:00:00Z",
+            "last_used_at": "2024-01-02T15:00:00Z",
+        },
+        {
+            "name": "cosmic-xyz789",
+            "display_name": "llmeetcode-merge-sorted-xyz789",
+            "state": "Stopped",
+            "web_url": "https://github.com/codespaces/cosmic-xyz789",
+            "created_at": "2024-01-01T08:00:00Z",
+            "last_used_at": "2024-01-01T12:00:00Z",
+        },
+        {
+            "name": "other-codespace",
+            "display_name": "my-other-project",  # Should be filtered out
+            "state": "Available",
+            "web_url": "https://github.com/codespaces/other",
+            "created_at": "2024-01-01T05:00:00Z",
+            "last_used_at": "2024-01-01T06:00:00Z",
+        },
+    ],
+}
+
+GITHUB_CODESPACES_EMPTY = {
+    "total_count": 0,
+    "codespaces": [],
+}
 
 
 class TestHome:
@@ -47,6 +89,32 @@ class TestHome:
         assert response.status_code == 200
         # Should show all problems when not logged in
         assert len(response.context["problems"]) == len(SAMPLE_PROBLEMS)
+
+    @patch("app.main.list_user_codespaces")
+    def test_home_shows_active_codespaces(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Test home page shows active codespaces for authenticated users"""
+        mock_list_codespaces.return_value = [
+            {
+                "name": "urban-space-abc123",
+                "display_name": "llmeetcode-two-sum-abc123",
+                "state": "Available",
+                "web_url": "https://github.com/codespaces/urban-space-abc123",
+                "created_at": "2024-01-01T10:00:00Z",
+                "last_used_at": "2024-01-02T15:00:00Z",
+                "problem_id": "two-sum",
+            },
+        ]
+
+        response = authenticated_client.get("/")
+        assert response.status_code == 200
+        active_codespaces = response.context["active_codespaces"]
+        assert "two-sum" in active_codespaces
+        assert (
+            active_codespaces["two-sum"]
+            == "https://github.com/codespaces/urban-space-abc123"
+        )
 
 
 class TestAuth:
@@ -543,3 +611,391 @@ class TestSessionEdgeCases:
 
         response = client.post("/codespaces/create", json={"problem_id": "two-sum"})
         assert response.status_code == 401
+
+
+class TestListUserCodespacesFunction:
+    """Test the list_user_codespaces helper function"""
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_list_codespaces_success(self, mock_client):
+        """GitHub API returns multiple codespaces, function filters and returns llmeetcode ones"""
+        from app.main import list_user_codespaces
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = GITHUB_CODESPACES_RESPONSE
+
+        mock_client.return_value.__aenter__.return_value.get.return_value = (
+            mock_response
+        )
+
+        result = asyncio.run(list_user_codespaces("test_token"))
+
+        assert len(result) == 2  # Only llmeetcode codespaces
+        assert result[0]["name"] == "urban-space-abc123"
+        assert result[1]["name"] == "cosmic-xyz789"
+
+        for codespace in result:
+            assert "name" in codespace
+            assert "web_url" in codespace
+            assert "state" in codespace
+            assert "display_name" in codespace
+            assert "created_at" in codespace
+            assert "last_used_at" in codespace
+            assert "problem_id" in codespace
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_list_codespaces_filters_by_prefix(self, mock_client):
+        """Only returns codespaces with llmeetcode- prefix, ignores others"""
+        from app.main import list_user_codespaces
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = GITHUB_CODESPACES_RESPONSE
+
+        mock_client.return_value.__aenter__.return_value.get.return_value = (
+            mock_response
+        )
+
+        result = asyncio.run(list_user_codespaces("test_token"))
+
+        assert len(result) == 2
+        for codespace in result:
+            assert codespace["display_name"].startswith("llmeetcode-")
+
+        names = [cs["name"] for cs in result]
+        assert "other-codespace" not in names
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_list_codespaces_extracts_problem_id(self, mock_client):
+        """Correctly parses problem_id from display_name"""
+        from app.main import list_user_codespaces
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = GITHUB_CODESPACES_RESPONSE
+
+        mock_client.return_value.__aenter__.return_value.get.return_value = (
+            mock_response
+        )
+
+        result = asyncio.run(list_user_codespaces("test_token"))
+
+        problem_ids = {cs["problem_id"] for cs in result}
+        assert "two-sum" in problem_ids
+        assert "merge-sorted" in problem_ids
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_list_codespaces_empty_response(self, mock_client):
+        """Returns empty list when no codespaces exist"""
+        from app.main import list_user_codespaces
+
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.json.return_value = GITHUB_CODESPACES_EMPTY
+
+        mock_client.return_value.__aenter__.return_value.get.return_value = (
+            mock_response
+        )
+
+        result = asyncio.run(list_user_codespaces("test_token"))
+
+        assert result == []
+        assert isinstance(result, list)
+
+
+class TestListCodespacesEndpoint:
+    """Test GET /codespaces/list endpoint"""
+
+    @patch("app.main.list_user_codespaces")
+    def test_list_codespaces_authenticated(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Returns filtered codespace list when authenticated"""
+        mock_list_codespaces.return_value = [
+            {
+                "name": "urban-space-abc123",
+                "display_name": "llmeetcode-two-sum-abc123",
+                "state": "Available",
+                "web_url": "https://github.com/codespaces/urban-space-abc123",
+                "created_at": "2024-01-01T10:00:00Z",
+                "last_used_at": "2024-01-02T15:00:00Z",
+                "problem_id": "two-sum",
+            },
+            {
+                "name": "cosmic-xyz789",
+                "display_name": "llmeetcode-merge-sorted-xyz789",
+                "state": "Stopped",
+                "web_url": "https://github.com/codespaces/cosmic-xyz789",
+                "created_at": "2024-01-01T08:00:00Z",
+                "last_used_at": "2024-01-01T12:00:00Z",
+                "problem_id": "merge-sorted",
+            },
+        ]
+
+        response = authenticated_client.get("/codespaces/list")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+        assert len(data) == 2
+        assert data[0]["name"] == "urban-space-abc123"
+        assert data[0]["problem_id"] == "two-sum"
+
+    def test_list_codespaces_unauthenticated(self, client):
+        """Returns 401 when not authenticated"""
+        response = client.get("/codespaces/list")
+        assert response.status_code == 401
+
+
+class TestGetActiveCodespaceEndpoint:
+    """Test GET /codespaces/{problem_id}/active endpoint"""
+
+    @patch("app.main.list_user_codespaces")
+    def test_get_active_codespace_found(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Returns existing codespace for problem"""
+        mock_list_codespaces.return_value = [
+            {
+                "name": "urban-space-abc123",
+                "display_name": "llmeetcode-two-sum-abc123",
+                "state": "Available",
+                "web_url": "https://github.com/codespaces/urban-space-abc123",
+                "created_at": "2024-01-01T10:00:00Z",
+                "last_used_at": "2024-01-02T15:00:00Z",
+                "problem_id": "two-sum",
+            },
+        ]
+
+        response = authenticated_client.get("/codespaces/two-sum/active")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data is not None
+        assert data["name"] == "urban-space-abc123"
+        assert data["problem_id"] == "two-sum"
+        assert data["state"] == "Available"
+        assert data["web_url"] == "https://github.com/codespaces/urban-space-abc123"
+
+    @patch("app.main.list_user_codespaces")
+    def test_get_active_codespace_not_found(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Returns null/empty when no codespace exists for problem"""
+        mock_list_codespaces.return_value = []
+
+        response = authenticated_client.get("/codespaces/nonexistent-problem/active")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data.get("codespace") is None
+
+    def test_get_active_codespace_unauthenticated(self, client):
+        """Returns 401 when not authenticated"""
+        response = client.get("/codespaces/two-sum/active")
+        assert response.status_code == 401
+
+
+class TestDeleteCodespaceFunction:
+    """Test the delete_codespace helper function"""
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_delete_codespace_success(self, mock_client):
+        """Deletion succeeds with 202 response"""
+        mock_response = MagicMock()
+        mock_response.status_code = 202
+
+        mock_client.return_value.__aenter__.return_value.delete.return_value = (
+            mock_response
+        )
+
+        result = asyncio.run(delete_codespace("test_token", "urban-space-abc123"))
+
+        assert result is True
+        mock_client.return_value.__aenter__.return_value.delete.assert_called_once()
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_delete_codespace_not_found(self, mock_client):
+        """Returns 404 when codespace doesn't exist"""
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+
+        mock_client.return_value.__aenter__.return_value.delete.return_value = (
+            mock_response
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(delete_codespace("test_token", "nonexistent"))
+
+        assert exc_info.value.status_code == 404
+        assert "not found" in exc_info.value.detail.lower()
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_delete_codespace_api_error(self, mock_client):
+        """Handles GitHub API errors appropriately"""
+        mock_response = MagicMock()
+        mock_response.status_code = 500
+        mock_response.json.return_value = {"message": "Internal Server Error"}
+
+        mock_client.return_value.__aenter__.return_value.delete.return_value = (
+            mock_response
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(delete_codespace("test_token", "some-codespace"))
+
+        assert exc_info.value.status_code == 500
+        assert "Failed to delete codespace" in exc_info.value.detail
+
+    @patch("app.main.httpx.AsyncClient")
+    def test_delete_codespace_forbidden(self, mock_client):
+        """Handles 403 forbidden response"""
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.json.return_value = {"message": "Must have admin access"}
+
+        mock_client.return_value.__aenter__.return_value.delete.return_value = (
+            mock_response
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(delete_codespace("test_token", "someone-elses-codespace"))
+
+        assert exc_info.value.status_code == 403
+
+
+class TestDeleteCodespaceEndpoint:
+    """Test DELETE /codespaces/{codespace_name} endpoint"""
+
+    @patch("app.main.delete_codespace")
+    def test_delete_codespace_authenticated(self, mock_delete, authenticated_client):
+        """Successfully deletes codespace when authenticated"""
+        mock_delete.return_value = True
+
+        response = authenticated_client.delete("/codespaces/urban-space-abc123")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "deleted"
+        mock_delete.assert_called_once()
+
+    def test_delete_codespace_unauthenticated(self, client):
+        """Returns 401 when not authenticated"""
+        response = client.delete("/codespaces/urban-space-abc123")
+        assert response.status_code == 401
+
+    @patch("app.main.delete_codespace")
+    def test_delete_codespace_not_found(self, mock_delete, authenticated_client):
+        """Returns 404 when codespace not found"""
+        mock_delete.side_effect = HTTPException(
+            status_code=404, detail="Codespace not found"
+        )
+
+        response = authenticated_client.delete("/codespaces/nonexistent")
+
+        assert response.status_code == 404
+
+    @patch("app.main.delete_codespace")
+    def test_delete_codespace_api_error(self, mock_delete, authenticated_client):
+        """Handles API errors appropriately"""
+        mock_delete.side_effect = HTTPException(
+            status_code=500, detail="Failed to delete codespace: Internal Server Error"
+        )
+
+        response = authenticated_client.delete("/codespaces/some-codespace")
+
+        assert response.status_code == 500
+
+
+class TestDashboardWithCodespaces:
+    """Test dashboard with codespaces list"""
+
+    @patch("app.main.list_user_codespaces")
+    def test_dashboard_shows_codespaces(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Dashboard shows active codespaces"""
+        mock_list_codespaces.return_value = [
+            {
+                "name": "urban-space-abc123",
+                "display_name": "llmeetcode-two-sum-abc123",
+                "state": "Available",
+                "web_url": "https://github.com/codespaces/urban-space-abc123",
+                "created_at": "2024-01-01T10:00:00Z",
+                "last_used_at": "2024-01-02T15:00:00Z",
+                "problem_id": "two-sum",
+            },
+            {
+                "name": "cosmic-xyz789",
+                "display_name": "llmeetcode-merge-sorted-xyz789",
+                "state": "Stopped",
+                "web_url": "https://github.com/codespaces/cosmic-xyz789",
+                "created_at": "2024-01-01T08:00:00Z",
+                "last_used_at": "2024-01-01T12:00:00Z",
+                "problem_id": "merge-sorted",
+            },
+        ]
+
+        response = authenticated_client.get("/dashboard")
+
+        assert response.status_code == 200
+        codespaces = response.context["codespaces"]
+        assert len(codespaces) == 2
+        assert codespaces[0]["name"] == "urban-space-abc123"
+        assert codespaces[0]["problem_title"] == "Two Sum"
+        assert codespaces[1]["problem_title"] == "Merge Sorted Arrays"
+
+    @patch("app.main.list_user_codespaces")
+    def test_dashboard_empty_codespaces(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Dashboard shows empty state when no codespaces"""
+        mock_list_codespaces.return_value = []
+
+        response = authenticated_client.get("/dashboard")
+
+        assert response.status_code == 200
+        codespaces = response.context["codespaces"]
+        assert codespaces == []
+
+    @patch("app.main.list_user_codespaces")
+    def test_dashboard_codespaces_api_failure(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Dashboard gracefully handles codespaces API failure"""
+        mock_list_codespaces.side_effect = HTTPException(
+            status_code=500, detail="API Error"
+        )
+
+        response = authenticated_client.get("/dashboard")
+
+        # Should still return 200 with empty codespaces
+        assert response.status_code == 200
+        codespaces = response.context["codespaces"]
+        assert codespaces == []
+
+    @patch("app.main.list_user_codespaces")
+    def test_dashboard_codespaces_unknown_problem(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        """Dashboard handles codespaces for unknown problems"""
+        mock_list_codespaces.return_value = [
+            {
+                "name": "test-codespace",
+                "display_name": "llmeetcode-unknown-problem-abc123",
+                "state": "Available",
+                "web_url": "https://github.com/codespaces/test",
+                "created_at": "2024-01-01T10:00:00Z",
+                "last_used_at": "2024-01-02T15:00:00Z",
+                "problem_id": "unknown-problem",
+            },
+        ]
+
+        response = authenticated_client.get("/dashboard")
+
+        assert response.status_code == 200
+        codespaces = response.context["codespaces"]
+        assert len(codespaces) == 1
+        # Should use problem_id as fallback title
+        assert codespaces[0]["problem_title"] == "unknown-problem"

@@ -49,6 +49,60 @@
         </div>
     </div>
 
+    <!-- Active Codespaces -->
+    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
+        <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
+            <i class="fas fa-code text-blue-500 mr-2"></i>
+            Active Codespaces
+        </h3>
+
+        {% if codespaces %}
+        <div class="space-y-3" id="codespaces-list">
+            {% for cs in codespaces %}
+            <div id="codespace-{{ cs.name }}" class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700 rounded-lg transition-all duration-300">
+                <div class="flex items-center gap-3">
+                    <span class="inline-flex items-center justify-center w-8 h-8 rounded-full
+                        {% if cs.state == 'Available' %}bg-green-100 text-green-600 dark:bg-green-900 dark:text-green-300
+                        {% elif cs.state == 'Stopped' %}bg-gray-100 text-gray-600 dark:bg-gray-600 dark:text-gray-300
+                        {% else %}bg-yellow-100 text-yellow-600 dark:bg-yellow-900 dark:text-yellow-300{% endif %}">
+                        <i class="fas fa-circle text-xs"></i>
+                    </span>
+                    <div>
+                        <span class="font-medium text-gray-900 dark:text-white">{{ cs.problem_title }}</span>
+                        <span class="ml-2 px-2 py-0.5 text-xs font-medium rounded-full
+                            {% if cs.state == 'Available' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
+                            {% elif cs.state == 'Stopped' %}bg-gray-100 text-gray-800 dark:bg-gray-600 dark:text-gray-200
+                            {% else %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% endif %}">
+                            {{ cs.state }}
+                        </span>
+                    </div>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="{{ cs.web_url }}" target="_blank"
+                        class="px-3 py-1.5 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg transition">
+                        <i class="fas fa-external-link-alt mr-1"></i>
+                        Open
+                    </a>
+                    <button onclick="deleteCodespace('{{ cs.name }}')"
+                        class="px-3 py-1.5 text-sm font-medium text-red-600 hover:text-white hover:bg-red-600 border border-red-600 rounded-lg transition"
+                        title="Delete codespace">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <div id="codespaces-empty" class="text-center py-6 text-gray-500 dark:text-gray-400">
+            <i class="fas fa-cloud text-3xl mb-2"></i>
+            <p>No active codespaces.</p>
+            <a href="/" class="text-blue-600 hover:text-blue-700 dark:text-blue-400 mt-1 inline-block text-sm">
+                Start coding a problem <i class="fas fa-arrow-right ml-1"></i>
+            </a>
+        </div>
+        {% endif %}
+    </div>
+
     <!-- Completed Problems List -->
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6">
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -142,6 +196,48 @@ async function uncomplete(problemId, difficulty) {
             }, 300);
         } else {
             alert('Failed to update');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function deleteCodespace(codespaceName) {
+    if (!confirm('Are you sure you want to delete this codespace? This cannot be undone.')) {
+        return;
+    }
+
+    try {
+        const response = await fetch(`/codespaces/${codespaceName}`, {
+            method: 'DELETE'
+        });
+
+        if (response.ok) {
+            // Remove the element with animation
+            const element = document.getElementById(`codespace-${codespaceName}`);
+            element.style.opacity = '0';
+            element.style.transform = 'translateX(20px)';
+
+            setTimeout(() => {
+                element.remove();
+
+                // Show empty state if no more codespaces
+                const list = document.getElementById('codespaces-list');
+                if (list && list.children.length === 0) {
+                    list.outerHTML = `
+                        <div id="codespaces-empty" class="text-center py-6 text-gray-500 dark:text-gray-400">
+                            <i class="fas fa-cloud text-3xl mb-2"></i>
+                            <p>No active codespaces.</p>
+                            <a href="/" class="text-blue-600 hover:text-blue-700 dark:text-blue-400 mt-1 inline-block text-sm">
+                                Start coding a problem <i class="fas fa-arrow-right ml-1"></i>
+                            </a>
+                        </div>
+                    `;
+                }
+            }, 300);
+        } else {
+            const data = await response.json();
+            alert('Failed to delete codespace: ' + (data.detail || 'Unknown error'));
         }
     } catch (error) {
         alert('Error: ' + error.message);

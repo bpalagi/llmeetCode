@@ -1,3 +1,5 @@
+# ENSURE RENDER DEPLOYMENT REMAINS FREE.
+
 databases:
   - name: llmeetcode-db
     plan: free

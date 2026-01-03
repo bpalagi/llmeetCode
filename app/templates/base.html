@@ -140,16 +140,8 @@
             localStorage.setItem('theme', theme);
         });
 
-        // Create codespace and redirect
-        async function openCodespace(problemId) {
-            // Check login status from body data attribute
-            const isLoggedIn = document.body.dataset.loggedIn === 'true';
-
-            if (!isLoggedIn) {
-                window.location.href = '/auth/login';
-                return;
-            }
-
+        // Actual codespace creation logic
+        async function doCreateCodespace(problemId) {
             showLoading('Creating your Codespace...');
 
             try {
@@ -171,7 +163,6 @@
 
                 const data = await response.json();
 
-                // Navigate to codespace immediately
                 if (data.web_url) {
                     window.location.href = data.web_url;
                 } else {
@@ -180,6 +171,38 @@
             } catch (error) {
                 hideLoading();
                 alert('Error creating codespace: ' + error.message);
+            }
+        }
+
+        // Create codespace and redirect (with rejoin check)
+        async function openCodespace(problemId) {
+            const isLoggedIn = document.body.dataset.loggedIn === 'true';
+
+            if (!isLoggedIn) {
+                window.location.href = '/auth/login';
+                return;
+            }
+
+            showLoading('Checking for existing codespace...');
+
+            try {
+                const checkResponse = await fetch(`/codespaces/${problemId}/active`);
+
+                if (checkResponse.ok) {
+                    const data = await checkResponse.json();
+
+                    // If codespace exists, redirect directly to it
+                    if (data && data.name) {
+                        window.location.href = data.web_url;
+                        return;
+                    }
+                }
+
+                // No existing codespace, create new one
+                await doCreateCodespace(problemId);
+            } catch (error) {
+                // If check fails, proceed with creation
+                await doCreateCodespace(problemId);
             }
         }
 

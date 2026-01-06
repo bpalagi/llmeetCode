@@ -82,6 +82,7 @@
                 {% endif %}
                 {% if logged_in %}
                 <button
+                    data-problem-id="{{ problem.id }}"
                     onclick="toggleComplete('{{ problem.id }}', {{ 'true' if problem.id in completed_ids else 'false' }})"
                     class="{% if problem.id in completed_ids %}bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %} px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center">
                     <i class="fas {% if problem.id in completed_ids %}fa-check-circle{% else %}fa-circle{% endif %}"></i>

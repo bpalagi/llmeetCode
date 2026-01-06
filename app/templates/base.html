@@ -214,7 +214,31 @@
                 });
 
                 if (response.ok) {
-                    window.location.reload();
+                    // Update UI in place without page reload
+                    const card = document.querySelector(`button[onclick*="toggleComplete('${problemId}'"]`).closest('.problem-card');
+                    const button = card.querySelector(`button[onclick*="toggleComplete"]`);
+                    const titleRow = card.querySelector('.flex.items-center.gap-3.mb-2');
+
+                    if (isCompleted) {
+                        // Was completed, now uncompleted
+                        button.className = 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center';
+                        button.innerHTML = '<i class="fas fa-circle"></i> Mark Complete';
+                        button.setAttribute('onclick', `toggleComplete('${problemId}', false)`);
+                        // Remove check icon from title
+                        const checkIcon = titleRow.querySelector('.fa-check-circle');
+                        if (checkIcon) checkIcon.parentElement.remove();
+                    } else {
+                        // Was not completed, now completed
+                        button.className = 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center';
+                        button.innerHTML = '<i class="fas fa-check-circle"></i> Completed';
+                        button.setAttribute('onclick', `toggleComplete('${problemId}', true)`);
+                        // Add check icon to title if not present
+                        if (!titleRow.querySelector('.fa-check-circle')) {
+                            const icon = document.createElement('i');
+                            icon.className = 'fas fa-check-circle text-green-500';
+                            titleRow.insertBefore(icon, titleRow.firstChild);
+                        }
+                    }
                 } else {
                     const error = await response.json();
                     alert('Failed to update: ' + (error.detail || 'Unknown error'));

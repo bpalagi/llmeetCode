@@ -9,19 +9,13 @@
 <!-- Filters -->
 <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-6">
     <div class="flex flex-wrap gap-4 items-center">
-        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty=${this.value}&topic={{ selected_topic }}&language={{ selected_language }}&hide_completed={{ hide_completed }}`">
+        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty=${this.value}&language={{ selected_language }}&hide_completed={{ hide_completed }}`">
             <option value="All Difficulties" {% if selected_difficulty == 'All Difficulties' %}selected{% endif %}>All Difficulties</option>
             {% for diff in all_difficulties %}
             <option value="{{ diff }}" {% if selected_difficulty == diff %}selected{% endif %}>{{ diff }}</option>
             {% endfor %}
         </select>
-        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic=${this.value}&language={{ selected_language }}&hide_completed={{ hide_completed }}`">
-            <option value="All Topics" {% if selected_topic == 'All Topics' %}selected{% endif %}>All Topics</option>
-            {% for topic in all_topics %}
-            <option value="{{ topic }}" {% if selected_topic == topic %}selected{% endif %}>{{ topic }}</option>
-            {% endfor %}
-        </select>
-        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic={{ selected_topic }}&language=${this.value}&hide_completed={{ hide_completed }}`">
+        <select class="px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500" onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&language=${this.value}&hide_completed={{ hide_completed }}`">
             <option value="All Languages" {% if selected_language == 'All Languages' %}selected{% endif %}>All Languages</option>
             {% for lang in all_languages %}
             <option value="{{ lang }}" {% if selected_language == lang %}selected{% endif %}>{{ lang }}</option>
@@ -32,7 +26,7 @@
             <span class="text-sm text-gray-600 dark:text-gray-400">Hide completed</span>
             <input type="checkbox"
                 {% if hide_completed == "true" %}checked{% endif %}
-                onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&topic={{ selected_topic }}&language={{ selected_language }}&hide_completed=${this.checked}`"
+                onchange="window.location.href=`/?difficulty={{ selected_difficulty }}&language={{ selected_language }}&hide_completed=${this.checked}`"
                 class="w-4 h-4 text-blue-600 bg-gray-100 dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-blue-500">
         </label>
         {% endif %}
@@ -60,9 +54,6 @@
                 <p class="text-gray-600 dark:text-gray-400 mb-3">{{ problem.description }}</p>
                 <div class="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                     <span><i class="fas fa-code mr-1"></i>{{ problem.language }}</span>
-                    {% for topic in problem.topics %}
-                    <span class="px-2 py-1 bg-gray-100 dark:bg-gray-700 rounded">{{ topic }}</span>
-                    {% endfor %}
                 </div>
             </div>
             <div class="ml-4 flex flex-col gap-2">

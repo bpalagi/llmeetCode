@@ -4,10 +4,11 @@ A modern coding interview platform that provides browser-based development envir
 
 ## Features
 
-- **Problem Catalog**: Browse coding challenges with filters for difficulty, topic, and language
+- **Problem Catalog**: Browse coding challenges with filters for difficulty and language
 - **GitHub Codespaces Integration**: One-click launch of disposable development environments
 - **Real-time IDE**: Full VS Code experience in the browser with pre-configured problems
 - **Secure Authentication**: GitHub OAuth with encrypted session management
+- **Dynamic Repo Creation**: Creates a private repo from template in user's account for each problem
 
 ## Quick Start
 
@@ -36,12 +37,12 @@ brew services stop postgresql@15
 
 1. Create a virtual environment:
 ```bash
-python -m venv venv
+python -m venv .venv
 ```
 
 2. Activate the virtual environment:
 ```bash
-source venv/bin/activate
+source .venv/bin/activate
 ```
 
 3. Install dependencies:
@@ -78,28 +79,18 @@ The app will be available at `http://localhost:8000`
 3. Note the Client ID and generate a Client Secret
 4. Add these to your `.env` file
 
-### Codespaces Template Repository
+### Problem Template Repositories
 
-Create a GitHub repository that contains:
-- `problem.py` - Starter code for the problem
-- `tests/test_problem.py` - Test cases
-- `.devcontainer/devcontainer.json` - Development container configuration
-- `README.md` - Problem description
+Problems are stored in the database with a reference to their GitHub template repository. Each template repo should:
 
-Example devcontainer.json:
-```json
-{
-    "name": "Python Coding Environment",
-    "image": "mcr.microsoft.com/devcontainers/python:3.10",
-    "customizations": {
-        "vscode": {
-            "extensions": [
-                "ms-python.python",
-                "ms-python.vscode-pylance"
-            ]
-        }
-    }
-```
+1. **Be marked as a template** in GitHub (Settings > Template repository)
+2. Contain the problem starter code and tests
+3. Include a `.devcontainer/devcontainer.json` for the Codespaces environment
+
+When a user starts a problem:
+1. A new private repo is created from the template in the user's GitHub account
+2. A Codespace is launched from that repo
+3. When the user deletes the Codespace, the repo is also deleted
 
 ## Git Hooks
 
@@ -138,7 +129,7 @@ The project is configured for automatic deployment to Render when pushing to the
    - `GITHUB_CLIENT_SECRET` - Your GitHub OAuth app client secret
    - `GITHUB_REDIRECT_URI` - Your Render app URL + `/auth/callback`
    - `SECRET_KEY` - A secure random string for session encryption
-   - `TEMPLATE_REPO` - GitHub repository for codespace templates
+   - `DATABASE_URL` - PostgreSQL connection string
 
 4. **Deployment Process**:
    - Push to your main branch

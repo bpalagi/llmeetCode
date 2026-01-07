@@ -1,7 +1,16 @@
 import os
 from datetime import UTC, datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, create_engine
+from sqlalchemy import (
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    create_engine,
+)
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
 
@@ -98,6 +107,7 @@ class User(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     completed_problems = relationship("CompletedProblem", back_populates="user")
+    user_repos = relationship("UserRepo", back_populates="user")
 
 
 class CompletedProblem(Base):
@@ -111,9 +121,79 @@ class CompletedProblem(Base):
     user = relationship("User", back_populates="completed_problems")
 
 
+class UserRepo(Base):
+    """Tracks repos created from templates for each user's codespace sessions."""
+
+    __tablename__ = "user_repos"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True)
+    github_username = Column(String, index=True)  # Owner of the created repo
+    repo_name = Column(String, index=True)  # Name of the created repo
+    codespace_name = Column(String, unique=True, index=True)  # Associated codespace
+    problem_id = Column(String, ForeignKey("problems.id"), index=True)
+    template_repo = Column(
+        String
+    )  # Source template repo (e.g., "bpalagi/slow-api-template")
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+    user = relationship("User", back_populates="user_repos")
+    problem = relationship("Problem")
+
+
+class Problem(Base):
+    """Coding problems available for interview practice."""
+
+    __tablename__ = "problems"
+
+    id = Column(String, primary_key=True, index=True)  # e.g., "slow-api"
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=False)
+    difficulty = Column(String, nullable=False)  # Easy, Medium, Hard
+    language = Column(String, nullable=False)  # Java, Python, etc.
+    template_repo = Column(String, nullable=False)  # e.g., "bpalagi/slow-api-template"
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    updated_at = Column(
+        DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
+    )
+
+
 def init_db():
-    """Create all tables"""
+    """Create all tables and seed initial data"""
     Base.metadata.create_all(bind=get_engine())
+    _seed_initial_data()
+
+
+def _seed_initial_data():
+    """Seed the database with initial problem data if empty."""
+    session_factory = get_session_local()
+    db = session_factory()
+    try:
+        # Check if we already have problems
+        existing = db.query(Problem).first()
+        if existing:
+            return
+
+        # Seed the slow-api problem
+        slow_api_problem = Problem(
+            id="slow-api",
+            title="Slow API Performance",
+            description="A Spring Boot REST API for managing orders is experiencing performance issues. "
+            "Investigate and optimize the API to improve response times.",
+            difficulty="Medium",
+            language="Java",
+            template_repo="bpalagi/slow-api-template",
+            is_active=True,
+        )
+        db.add(slow_api_problem)
+        db.commit()
+        print("[Seed] Added initial problem: slow-api")
+    except Exception as e:
+        print(f"[Seed] Error seeding data: {e}")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def get_db():

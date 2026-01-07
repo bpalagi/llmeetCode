@@ -8,7 +8,6 @@ from fastapi import HTTPException
 from itsdangerous import BadSignature
 
 from app.main import (
-    SAMPLE_PROBLEMS,
     create_codespace,
     delete_codespace,
     get_session_data,
@@ -54,41 +53,35 @@ GITHUB_CODESPACES_EMPTY = {
 class TestHome:
     """Test cases for the home page"""
 
-    def test_home_unauthenticated(self, client):
+    def test_home_unauthenticated(self, client, db_session):
         """Test home page without authentication"""
         response = client.get("/")
         assert response.status_code == 200
         assert "LLMeetCode" in response.text
         assert "Login with GitHub" in response.text
-        assert len(SAMPLE_PROBLEMS) == len(response.context["problems"])
+        # Should show problems from database (seeded in conftest)
+        assert len(response.context["problems"]) >= 1
 
-    def test_home_with_difficulty_filter(self, client):
+    def test_home_with_difficulty_filter(self, client, db_session):
         """Test filtering by difficulty"""
         response = client.get("/?difficulty=Easy")
         assert response.status_code == 200
         problems = response.context["problems"]
         assert all(p["difficulty"] == "Easy" for p in problems)
 
-    def test_home_with_topic_filter(self, client):
-        """Test filtering by topic"""
-        response = client.get("/?topic=Array")
-        assert response.status_code == 200
-        problems = response.context["problems"]
-        assert all("Array" in p["topics"] for p in problems)
-
-    def test_home_with_language_filter(self, client):
+    def test_home_with_language_filter(self, client, db_session):
         """Test filtering by language"""
-        response = client.get("/?language=Python")
+        response = client.get("/?language=Java")
         assert response.status_code == 200
         problems = response.context["problems"]
-        assert all(p["language"] == "Python" for p in problems)
+        assert all(p["language"] == "Java" for p in problems)
 
-    def test_home_with_hide_completed(self, client):
+    def test_home_with_hide_completed(self, client, db_session):
         """Test hiding completed problems when not logged in"""
         response = client.get("/?hide_completed=true")
         assert response.status_code == 200
-        # Should show all problems when not logged in
-        assert len(response.context["problems"]) == len(SAMPLE_PROBLEMS)
+        # Should show all problems when not logged in (no completed problems)
+        assert len(response.context["problems"]) >= 1
 
     @patch("app.main.list_user_codespaces")
     def test_home_shows_active_codespaces(
@@ -287,92 +280,126 @@ class TestCreateCodespaceFunction:
     """Test codespace creation function"""
 
     @patch("app.main.httpx.AsyncClient")
-    def test_create_codespace_invalid_problem(self, mock_client):
+    def test_create_codespace_invalid_problem(self, mock_client, db_session):
         """Test create_codespace with invalid problem ID"""
         import asyncio
 
-        with pytest.raises(HTTPException):  # Should raise HTTPException
-            asyncio.run(create_codespace("test_token", "invalid-problem"))
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                create_codespace(
+                    access_token="test_token",
+                    problem_id="invalid-problem",
+                    username="testuser",
+                    user_id=1,
+                    db=db_session,
+                )
+            )
+        assert exc_info.value.status_code == 404
+        assert "Problem not found" in exc_info.value.detail
 
     @patch("app.main.httpx.AsyncClient")
-    def test_create_codespace_repo_not_found(self, mock_client):
-        """Test create_codespace when repository is not found"""
+    def test_create_codespace_template_not_found(self, mock_client, db_session):
+        """Test create_codespace when template repository is not found"""
         import asyncio
 
         mock_response = MagicMock()
         mock_response.status_code = 404
         mock_response.json.return_value = {"message": "Not Found"}
 
-        mock_client.return_value.__aenter__.return_value.get.return_value = (
+        mock_client.return_value.__aenter__.return_value.post.return_value = (
             mock_response
         )
 
-        with pytest.raises(Exception) as exc_info:
-            asyncio.run(create_codespace("test_token", "two-sum"))
-
-        assert "Failed to get repository info" in str(exc_info.value.detail)
-
-    @patch("app.main.httpx.AsyncClient")
-    def test_create_codespace_no_branches(self, mock_client):
-        """Test create_codespace when repository has no branches"""
-        import asyncio
-
-        # Mock repo response
-        mock_repo_response = MagicMock()
-        mock_repo_response.status_code = 200
-        mock_repo_response.json.return_value = {"id": 123, "default_branch": None}
-
-        mock_client.return_value.__aenter__.return_value.get.return_value = (
-            mock_repo_response
-        )
-
-        with pytest.raises(Exception) as exc_info:
-            asyncio.run(create_codespace("test_token", "two-sum"))
-
-        assert "Repository has no branches" in str(exc_info.value.detail)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                create_codespace(
+                    access_token="test_token",
+                    problem_id="two-sum",
+                    username="testuser",
+                    user_id=1,
+                    db=db_session,
+                )
+            )
+        assert "not marked as a template" in exc_info.value.detail
 
     @patch("app.main.httpx.AsyncClient")
-    def test_create_codespace_creation_failed(self, mock_client):
+    def test_create_codespace_creation_failed(self, mock_client, db_session):
         """Test create_codespace when codespace creation fails"""
         import asyncio
 
-        # Mock repo response
-        mock_repo_response = MagicMock()
-        mock_repo_response.status_code = 200
-        mock_repo_response.json.return_value = {"id": 123, "default_branch": "main"}
+        # Mock template repo generation response (success)
+        mock_generate_response = MagicMock()
+        mock_generate_response.status_code = 201
+        mock_generate_response.json.return_value = {
+            "id": 456,
+            "full_name": "testuser/llmeetcode-two-sum-abc123",
+            "default_branch": "main",
+        }
 
         # Mock machines response
         mock_machines_response = MagicMock()
         mock_machines_response.status_code = 200
         mock_machines_response.json.return_value = {"machines": []}
 
-        # Mock creation response
+        # Mock codespace creation response (failure)
         mock_creation_response = MagicMock()
         mock_creation_response.status_code = 400
         mock_creation_response.json.return_value = {"message": "Insufficient quota"}
 
-        mock_client.return_value.__aenter__.return_value.get.side_effect = [
-            mock_repo_response,
-            mock_machines_response,
+        # Mock repo deletion response (cleanup)
+        mock_delete_response = MagicMock()
+        mock_delete_response.status_code = 204
+
+        mock_client.return_value.__aenter__.return_value.get.return_value = (
+            mock_machines_response
+        )
+        mock_client.return_value.__aenter__.return_value.post.side_effect = [
+            mock_generate_response,
+            mock_creation_response,
         ]
-        mock_client.return_value.__aenter__.return_value.post.return_value = (
-            mock_creation_response
+        mock_client.return_value.__aenter__.return_value.delete.return_value = (
+            mock_delete_response
         )
 
-        with pytest.raises(Exception) as exc_info:
-            asyncio.run(create_codespace("test_token", "two-sum"))
-
-        assert "Failed to create codespace" in str(exc_info.value.detail)
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                create_codespace(
+                    access_token="test_token",
+                    problem_id="two-sum",
+                    username="testuser",
+                    user_id=1,
+                    db=db_session,
+                )
+            )
+        assert "Failed to create codespace" in exc_info.value.detail
 
     @patch("app.main.httpx.AsyncClient")
-    def test_create_codespace_success(self, mock_client):
+    def test_create_codespace_success(self, mock_client, db_session):
         """Test successful codespace creation"""
         import asyncio
 
-        # Mock repo response
-        mock_repo_response = MagicMock()
-        mock_repo_response.status_code = 200
-        mock_repo_response.json.return_value = {"id": 123, "default_branch": "main"}
+        from app.database import User
+
+        # Create a user in the database
+        user = db_session.query(User).filter(User.github_id == 99999).first()
+        if not user:
+            user = User(
+                github_id=99999,
+                login="testuser",
+                name="Test User",
+            )
+            db_session.add(user)
+            db_session.commit()
+            db_session.refresh(user)
+
+        # Mock template repo generation response
+        mock_generate_response = MagicMock()
+        mock_generate_response.status_code = 201
+        mock_generate_response.json.return_value = {
+            "id": 456,
+            "full_name": "testuser/llmeetcode-two-sum-abc123",
+            "default_branch": "main",
+        }
 
         # Mock machines response
         mock_machines_response = MagicMock()
@@ -381,7 +408,7 @@ class TestCreateCodespaceFunction:
             "machines": [{"name": "standardLinux"}]
         }
 
-        # Mock creation response
+        # Mock codespace creation response
         mock_creation_response = MagicMock()
         mock_creation_response.status_code = 201
         mock_creation_response.json.return_value = {
@@ -391,19 +418,31 @@ class TestCreateCodespaceFunction:
             "created_at": "2024-01-01T00:00:00Z",
         }
 
-        mock_client.return_value.__aenter__.return_value.get.side_effect = [
-            mock_repo_response,
-            mock_machines_response,
-        ]
-        mock_client.return_value.__aenter__.return_value.post.return_value = (
-            mock_creation_response
+        mock_client.return_value.__aenter__.return_value.get.return_value = (
+            mock_machines_response
         )
+        mock_client.return_value.__aenter__.return_value.post.side_effect = [
+            mock_generate_response,
+            mock_creation_response,
+        ]
 
-        result = asyncio.run(create_codespace("test_token", "two-sum"))
+        # Get the user_id as an integer for the function call
+        the_user_id: int = user.id  # type: ignore[assignment]
+
+        result = asyncio.run(
+            create_codespace(
+                access_token="test_token",
+                problem_id="two-sum",
+                username="testuser",
+                user_id=the_user_id,
+                db=db_session,
+            )
+        )
 
         assert result["name"] == "test-codespace"
         assert result["web_url"] == "https://github.com/codespaces/test"
         assert result["state"] == "Creating"
+        assert "repo_name" in result
 
 
 class TestDashboard:
@@ -494,8 +533,8 @@ class TestDashboardWithCompleted:
         db_session.add(user)
         db_session.commit()
 
-        # Add completed problems
-        for problem_id in ["two-sum", "merge-sorted"]:
+        # Add completed problems (use seeded test problems: slow-api and two-sum)
+        for problem_id in ["slow-api", "two-sum"]:
             completion = CompletedProblem(user_id=user.id, problem_id=problem_id)
             db_session.add(completion)
         db_session.commit()
@@ -928,12 +967,12 @@ class TestDashboardWithCodespaces:
             },
             {
                 "name": "cosmic-xyz789",
-                "display_name": "llmeetcode-merge-sorted-xyz789",
+                "display_name": "llmeetcode-slow-api-xyz789",
                 "state": "Stopped",
                 "web_url": "https://github.com/codespaces/cosmic-xyz789",
                 "created_at": "2024-01-01T08:00:00Z",
                 "last_used_at": "2024-01-01T12:00:00Z",
-                "problem_id": "merge-sorted",
+                "problem_id": "slow-api",
             },
         ]
 
@@ -944,7 +983,7 @@ class TestDashboardWithCodespaces:
         assert len(codespaces) == 2
         assert codespaces[0]["name"] == "urban-space-abc123"
         assert codespaces[0]["problem_title"] == "Two Sum"
-        assert codespaces[1]["problem_title"] == "Merge Sorted Arrays"
+        assert codespaces[1]["problem_title"] == "Slow API Performance"
 
     @patch("app.main.list_user_codespaces")
     def test_dashboard_empty_codespaces(
@@ -1009,8 +1048,9 @@ class TestMarkCompleteToggleUI:
         response = authenticated_client.get("/")
         assert response.status_code == 200
         # Check that the data-problem-id attribute is present in the rendered HTML
+        # Using seeded test problems: slow-api and two-sum
+        assert 'data-problem-id="slow-api"' in response.text
         assert 'data-problem-id="two-sum"' in response.text
-        assert 'data-problem-id="merge-sorted"' in response.text
 
     def test_mark_complete_button_not_shown_unauthenticated(self, client):
         """Test that Mark Complete button is not shown when not logged in"""
@@ -1074,12 +1114,12 @@ class TestMarkCompleteToggleUI:
 
     def test_uncompleted_problem_no_check_icon(self, authenticated_client):
         """Test that uncompleted problems don't show check icon in title"""
-        # Ensure problem is not completed
-        authenticated_client.delete("/problems/merge-sorted/complete")
+        # Ensure problem is not completed (use slow-api which exists in test seed)
+        authenticated_client.delete("/problems/slow-api/complete")
 
         response = authenticated_client.get("/")
         assert response.status_code == 200
-        # The merge-sorted problem card should not have the green check icon
+        # The slow-api problem card should not have the green check icon
         # (but two-sum might if it was completed in another test)
 
     def test_hide_completed_filter_works(self, authenticated_client):
@@ -1100,14 +1140,14 @@ class TestMarkCompleteToggleUI:
         """Test that hide_completed filter still shows uncompleted problems"""
         # Mark one problem as complete
         authenticated_client.post("/problems/two-sum/complete")
-        # Ensure another is not completed
-        authenticated_client.delete("/problems/merge-sorted/complete")
+        # Ensure another is not completed (use slow-api which exists in test seed)
+        authenticated_client.delete("/problems/slow-api/complete")
 
         # Get page with hide_completed=true
         response = authenticated_client.get("/?hide_completed=true")
         assert response.status_code == 200
 
-        # merge-sorted should still be in the problems list
+        # slow-api should still be in the problems list
         problems = response.context["problems"]
         problem_ids = [p["id"] for p in problems]
-        assert "merge-sorted" in problem_ids
+        assert "slow-api" in problem_ids

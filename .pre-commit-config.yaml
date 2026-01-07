@@ -23,7 +23,7 @@ repos:
     hooks:
       - id: pytest
         name: pytest
-        entry: bash -c 'source venv/bin/activate 2>/dev/null || true && pytest --cov=app --cov-report=term-missing'
+        entry: .venv/bin/pytest --cov=app --cov-report=term-missing
         language: system
         pass_filenames: false
         always_run: true

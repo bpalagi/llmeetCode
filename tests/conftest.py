@@ -17,7 +17,6 @@ os.environ["GITHUB_CLIENT_ID"] = "test_client_id"
 os.environ["GITHUB_CLIENT_SECRET"] = "test_client_secret"
 os.environ["GITHUB_REDIRECT_URI"] = "http://localhost:8000/auth/callback"
 os.environ["SECRET_KEY"] = "test-secret-key"
-os.environ["TEMPLATE_REPO"] = "test/repo"
 
 # Module-level container reference
 _postgres_container = None
@@ -123,7 +122,7 @@ def db_session():
 
     Creates tables before yielding and cleans up after each test.
     """
-    from app.database import Base, get_engine, get_session_local
+    from app.database import Base, Problem, get_engine, get_session_local
 
     engine = get_engine()
     SessionLocal = get_session_local()
@@ -132,6 +131,33 @@ def db_session():
     Base.metadata.create_all(bind=engine)
 
     session = SessionLocal()
+
+    # Seed test problems if they don't exist
+    if not session.query(Problem).first():
+        test_problems = [
+            Problem(
+                id="slow-api",
+                title="Slow API Performance",
+                description="A Spring Boot REST API is experiencing performance issues.",
+                difficulty="Medium",
+                language="Java",
+                template_repo="bpalagi/slow-api-template",
+                is_active=True,
+            ),
+            Problem(
+                id="two-sum",
+                title="Two Sum",
+                description="Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
+                difficulty="Easy",
+                language="Python",
+                template_repo="test/two-sum-template",
+                is_active=True,
+            ),
+        ]
+        for p in test_problems:
+            session.add(p)
+        session.commit()
+
     try:
         yield session
     finally:
@@ -168,7 +194,11 @@ def authenticated_client(db_session):
 
     test_client = TestClient(app)
     session_token = serializer.dumps(
-        {"access_token": "test_token", "user_id": user_id, "user": {"id": user_id}}
+        {
+            "access_token": "test_token",
+            "user_id": user_id,
+            "user": {"id": user_id, "login": "testuser", "name": "Test User"},
+        }
     )
     test_client.cookies.set("session", str(session_token))
     return test_client

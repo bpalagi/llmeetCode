@@ -37,18 +37,6 @@
         </div>
     </div>
 
-    <!-- Progress Bar -->
-    <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-6">
-        <div class="flex justify-between mb-2">
-            <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Overall Progress</span>
-            <span id="progress-text" class="text-sm text-gray-600 dark:text-gray-400">{{ stats.total }} / {{ total_problems }} problems</span>
-        </div>
-        <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-3">
-            {% set progress = (stats.total / total_problems * 100) if total_problems > 0 else 0 %}
-            <div id="progress-bar" class="bg-blue-600 h-3 rounded-full transition-all duration-300" style="width: {{ progress }}%"></div>
-        </div>
-    </div>
-
     <!-- Active Codespaces -->
     <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 mb-6">
         <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">
@@ -173,12 +161,6 @@ async function uncomplete(problemId, difficulty) {
                 const diffCount = parseInt(diffEl.textContent) - 1;
                 totalEl.textContent = total;
                 diffEl.textContent = diffCount;
-
-                // Update progress bar
-                const progressBar = document.getElementById('progress-bar');
-                const totalProblems = {{ total_problems }};
-                progressBar.style.width = `${(total / totalProblems) * 100}%`;
-                document.getElementById('progress-text').textContent = `${total} / ${totalProblems} problems`;
 
                 // Show empty state if no more problems
                 const list = document.getElementById('completed-list');

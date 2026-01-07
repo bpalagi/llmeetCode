@@ -13,7 +13,7 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .database import CompletedProblem, User, get_db, init_db
+from .database import CompletedProblem, Problem, User, UserRepo, get_db, init_db
 
 # Load environment variables from .env file
 load_dotenv()
@@ -36,7 +36,6 @@ GITHUB_REDIRECT_URI = os.getenv(
     "GITHUB_REDIRECT_URI", "http://localhost:8000/auth/callback"
 )
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
-TEMPLATE_REPO = os.getenv("TEMPLATE_REPO", "llmeet/problem-template")
 
 # Session management
 serializer = URLSafeTimedSerializer(SECRET_KEY)
@@ -46,74 +45,6 @@ templates = Jinja2Templates(directory="app/templates")
 
 # Static files
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
-
-# Sample problems data
-SAMPLE_PROBLEMS = [
-    {
-        "id": "two-sum",
-        "title": "Two Sum",
-        "difficulty": "Easy",
-        "description": "Given an array of integers nums and an integer target, return indices of the two numbers such that they add up to target.",
-        "topics": ["Array", "Hash Table"],
-        "language": "Python",
-    },
-    {
-        "id": "merge-sorted",
-        "title": "Merge Sorted Arrays",
-        "difficulty": "Medium",
-        "description": "Given two sorted integer arrays nums1 and nums2, merge nums2 into nums1 as one sorted array.",
-        "topics": ["Array", "Two Pointers"],
-        "language": "Python",
-    },
-    {
-        "id": "binary-tree-inorder",
-        "title": "Binary Tree Inorder Traversal",
-        "difficulty": "Easy",
-        "description": "Given the root of a binary tree, return the inorder traversal of its nodes' values.",
-        "topics": ["Tree", "Depth-First Search"],
-        "language": "Python",
-    },
-    {
-        "id": "validate-binary-tree",
-        "title": "Validate Binary Search Tree",
-        "difficulty": "Medium",
-        "description": "Given the root of a binary tree, determine if it is a valid binary search tree.",
-        "topics": ["Tree", "Binary Search Tree"],
-        "language": "Java",
-    },
-    {
-        "id": "longest-palindromic-substring",
-        "title": "Longest Palindromic Substring",
-        "difficulty": "Hard",
-        "description": "Given a string s, return the longest palindromic substring in s.",
-        "topics": ["String", "Dynamic Programming"],
-        "language": "Python",
-    },
-    {
-        "id": "coin-change",
-        "title": "Coin Change",
-        "difficulty": "Medium",
-        "description": "You are given an integer array coins representing coins of different denominations and an integer amount. Return the fewest number of coins that you need to make up that amount.",
-        "topics": ["Array", "Dynamic Programming", "Breadth-First Search"],
-        "language": "JavaScript",
-    },
-    {
-        "id": "merge-k-sorted-lists",
-        "title": "Merge K Sorted Lists",
-        "difficulty": "Hard",
-        "description": "You are given an array of k linked-lists lists, each linked-list is sorted in ascending order. Merge all the linked-lists into one sorted linked-list.",
-        "topics": ["Linked List", "Divide and Conquer", "Heap"],
-        "language": "Python",
-    },
-    {
-        "id": "reverse-linked-list",
-        "title": "Reverse Linked List",
-        "difficulty": "Easy",
-        "description": "Given the head of a singly linked list, reverse the list, and return the reversed list.",
-        "topics": ["Linked List"],
-        "language": "Java",
-    },
-]
 
 
 class CodespaceRequest(BaseModel):
@@ -132,13 +63,38 @@ def get_session_data(request: Request) -> dict[str, Any]:
         return {}
 
 
-async def create_codespace(access_token: str, problem_id: str) -> dict:
-    """Create a GitHub Codespace for the given problem"""
+async def create_codespace(
+    access_token: str, problem_id: str, username: str, user_id: int, db: Session
+) -> dict:
+    """Create a GitHub Codespace for the given problem.
 
-    # Validate problem ID exists
-    problem = next((p for p in SAMPLE_PROBLEMS if p["id"] == problem_id), None)
+    This function:
+    1. Creates a new repo in the user's account from the problem's template
+    2. Creates a codespace from that new repo
+    3. Tracks the repo in the database for later cleanup
+
+    Args:
+        access_token: GitHub OAuth access token
+        problem_id: The problem identifier
+        username: GitHub username of the authenticated user
+        user_id: Database user ID
+        db: Database session
+
+    Returns:
+        Dict with codespace info: name, web_url, state, created_at, repo_name
+    """
+
+    # Validate problem ID exists and get problem from database
+    problem = (
+        db.query(Problem)
+        .filter(Problem.id == problem_id, Problem.is_active.is_(True))
+        .first()
+    )
     if not problem:
         raise HTTPException(status_code=404, detail="Problem not found")
+
+    # Get the template repo from the problem
+    template_repo = problem.template_repo
 
     headers = {
         "Authorization": f"Bearer {access_token}",
@@ -146,31 +102,69 @@ async def create_codespace(access_token: str, problem_id: str) -> dict:
         "X-GitHub-Api-Version": "2022-11-28",
     }
 
-    async with httpx.AsyncClient() as client:
-        # First, get the repository ID from the repository name
-        repo_response = await client.get(
-            f"https://api.github.com/repos/{TEMPLATE_REPO}", headers=headers
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        # Step 1: Create a new repo from the template in the user's account
+        unique_suffix = secrets.token_hex(4)
+        new_repo_name = f"llmeetcode-{problem_id}-{unique_suffix}"
+
+        # Create repo from template
+        create_repo_response = await client.post(
+            f"https://api.github.com/repos/{template_repo}/generate",
+            json={
+                "owner": username,
+                "name": new_repo_name,
+                "private": True,
+                "description": f"LLMeetCode interview problem: {problem.title}",
+            },
+            headers=headers,
         )
 
-        if repo_response.status_code != 200:
-            error_detail = repo_response.json().get("message", "Unknown error")
-            raise HTTPException(
-                status_code=500, detail=f"Failed to get repository info: {error_detail}"
-            )
-
-        repo_data = repo_response.json()
-        repository_id = repo_data["id"]
-        default_branch = repo_data.get("default_branch")
-
-        if not default_branch:
+        if create_repo_response.status_code == 404:
             raise HTTPException(
                 status_code=500,
-                detail="Repository has no branches. Please initialize the repository with at least a README file and a commit.",
+                detail=f"Template repository '{template_repo}' not found or not marked as a template. "
+                "Please ensure the template repo exists and is marked as a template in GitHub settings.",
+            )
+        elif create_repo_response.status_code != 201:
+            error_data = create_repo_response.json()
+            error_detail = error_data.get("message", "Unknown error")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create repository from template: {error_detail}",
             )
 
-        # Get available machine types for this repository
+        new_repo_data = create_repo_response.json()
+        new_repo_full_name = new_repo_data["full_name"]
+        repository_id = new_repo_data["id"]
+        default_branch = new_repo_data.get("default_branch", "main")
+
+        # Wait for the repo to be fully initialized by polling for the branch
+        import asyncio
+
+        max_retries = 10
+        for attempt in range(max_retries):
+            await asyncio.sleep(2)
+            # Check if the branch exists
+            branch_response = await client.get(
+                f"https://api.github.com/repos/{new_repo_full_name}/branches/{default_branch}",
+                headers=headers,
+            )
+            if branch_response.status_code == 200:
+                break
+            if attempt == max_retries - 1:
+                # Clean up the repo if we can't verify it's ready
+                await client.delete(
+                    f"https://api.github.com/repos/{new_repo_full_name}",
+                    headers=headers,
+                )
+                raise HTTPException(
+                    status_code=500,
+                    detail="Repository created but branch not available. Please try again.",
+                )
+
+        # Step 2: Get available machine types for the new repository
         machines_response = await client.get(
-            f"https://api.github.com/repos/{TEMPLATE_REPO}/codespaces/machines",
+            f"https://api.github.com/repos/{new_repo_full_name}/codespaces/machines",
             headers=headers,
         )
 
@@ -181,18 +175,18 @@ async def create_codespace(access_token: str, problem_id: str) -> dict:
             if machines and "machines" in machines and len(machines["machines"]) > 0:
                 machine_type = machines["machines"][0]["name"]
 
-        # Codespace configuration
+        # Step 3: Create the codespace from the new repo
+        display_name = f"llmeetcode-{problem_id}-{unique_suffix}"
         codespace_data = {
             "repository_id": repository_id,
             "ref": default_branch,
             "location": "WestUs2",
-            "machine": machine_type,  # Use the fetched machine type
+            "machine": machine_type,
             "devcontainer_path": ".devcontainer/devcontainer.json",
-            "display_name": f"llmeetcode-{problem_id}-{secrets.token_hex(4)}",
+            "display_name": display_name,
             "idle_timeout_minutes": 30,
         }
 
-        # Create the codespace
         response = await client.post(
             "https://api.github.com/user/codespaces",
             json=codespace_data,
@@ -200,8 +194,13 @@ async def create_codespace(access_token: str, problem_id: str) -> dict:
         )
 
         if response.status_code != 201:
+            # If codespace creation fails, try to clean up the repo we created
+            await client.delete(
+                f"https://api.github.com/repos/{new_repo_full_name}",
+                headers=headers,
+            )
             error_data = response.json()
-            print(f"GitHub API Error Response: {error_data}")  # Debug print
+            print(f"GitHub API Error Response: {error_data}")
             error_detail = error_data.get("message", "Unknown error")
             raise HTTPException(
                 status_code=500, detail=f"Failed to create codespace: {error_detail}"
@@ -209,7 +208,19 @@ async def create_codespace(access_token: str, problem_id: str) -> dict:
 
         codespace = response.json()
 
-        # Return the codespace info immediately, even if still provisioning
+        # Step 4: Track the repo in the database for cleanup later
+        user_repo = UserRepo(
+            user_id=user_id,
+            github_username=username,
+            repo_name=new_repo_name,
+            codespace_name=codespace["name"],
+            problem_id=problem_id,
+            template_repo=template_repo,
+        )
+        db.add(user_repo)
+        db.commit()
+
+        # Return the codespace info
         return {
             "name": codespace["name"],
             "web_url": codespace.get(
@@ -217,6 +228,7 @@ async def create_codespace(access_token: str, problem_id: str) -> dict:
             ),
             "state": codespace.get("state", "Unknown"),
             "created_at": codespace.get("created_at"),
+            "repo_name": new_repo_full_name,
         }
 
 
@@ -334,12 +346,52 @@ async def delete_codespace(access_token: str, codespace_name: str) -> bool:
             )
 
 
+async def delete_user_repo(
+    access_token: str, github_username: str, repo_name: str
+) -> bool:
+    """Delete a user's repository that was created for a codespace session.
+
+    Args:
+        access_token: GitHub OAuth access token
+        github_username: The GitHub username who owns the repo
+        repo_name: The name of the repo to delete (not full_name, just repo name)
+
+    Returns:
+        True if deletion was successful or repo not found (already deleted)
+
+    Raises:
+        HTTPException: If deletion fails for reasons other than 404
+    """
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Accept": "application/vnd.github.v3+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    repo_full_name = f"{github_username}/{repo_name}"
+
+    async with httpx.AsyncClient() as client:
+        response = await client.delete(
+            f"https://api.github.com/repos/{repo_full_name}",
+            headers=headers,
+        )
+
+        if response.status_code in (204, 404):
+            # 204 = deleted successfully, 404 = already gone
+            return True
+        else:
+            error_msg = response.json().get("message", "Unknown error")
+            raise HTTPException(
+                status_code=response.status_code,
+                detail=f"Failed to delete repository: {error_msg}",
+            )
+
+
 @app.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
     db: Session = Depends(get_db),
     difficulty: str | None = None,
-    topic: str | None = None,
     language: str | None = None,
     hide_completed: str | None = None,
 ):
@@ -371,19 +423,30 @@ async def home(
                 # If fetching codespaces fails, continue without them
                 pass
 
-    # Filter problems based on query parameters
-    filtered_problems = SAMPLE_PROBLEMS.copy()
+    # Get all active problems from database
+    problems_query = db.query(Problem).filter(Problem.is_active.is_(True))
 
+    # Apply filters
     if difficulty and difficulty != "All Difficulties":
-        filtered_problems = [
-            p for p in filtered_problems if p["difficulty"] == difficulty
-        ]
-
-    if topic and topic != "All Topics":
-        filtered_problems = [p for p in filtered_problems if topic in p["topics"]]
+        problems_query = problems_query.filter(Problem.difficulty == difficulty)
 
     if language and language != "All Languages":
-        filtered_problems = [p for p in filtered_problems if p["language"] == language]
+        problems_query = problems_query.filter(Problem.language == language)
+
+    all_problems = problems_query.all()
+
+    # Convert to dict format for template compatibility
+    filtered_problems = [
+        {
+            "id": p.id,
+            "title": p.title,
+            "description": p.description,
+            "difficulty": p.difficulty,
+            "language": p.language,
+            "template_repo": p.template_repo,
+        }
+        for p in all_problems
+    ]
 
     # Hide completed problems if requested
     if hide_completed_bool and completed_ids:
@@ -391,10 +454,10 @@ async def home(
             p for p in filtered_problems if p["id"] not in completed_ids
         ]
 
-    # Get unique values for filter options
-    all_difficulties = sorted({p["difficulty"] for p in SAMPLE_PROBLEMS})
-    all_topics = sorted({topic for p in SAMPLE_PROBLEMS for topic in p["topics"]})
-    all_languages = sorted({p["language"] for p in SAMPLE_PROBLEMS})
+    # Get unique values for filter options from all active problems
+    all_active_problems = db.query(Problem).filter(Problem.is_active.is_(True)).all()
+    all_difficulties = sorted({p.difficulty for p in all_active_problems})
+    all_languages = sorted({p.language for p in all_active_problems})
 
     return templates.TemplateResponse(
         "index.html",
@@ -407,10 +470,8 @@ async def home(
             "active_codespaces": active_codespaces,
             "hide_completed": "true" if hide_completed_bool else "false",
             "selected_difficulty": difficulty or "All Difficulties",
-            "selected_topic": topic or "All Topics",
             "selected_language": language or "All Languages",
             "all_difficulties": all_difficulties,
-            "all_topics": all_topics,
             "all_languages": all_languages,
         },
     )
@@ -423,7 +484,7 @@ async def login():
         f"https://github.com/login/oauth/authorize?"
         f"client_id={GITHUB_CLIENT_ID}&"
         f"redirect_uri={GITHUB_REDIRECT_URI}&"
-        f"scope=codespace user:email"
+        f"scope=codespace user:email repo delete_repo"
     )
     return RedirectResponse(auth_url, status_code=302)
 
@@ -516,16 +577,33 @@ async def auth_callback(code: str, db: Session = Depends(get_db)):
 
 
 @app.post("/codespaces/create")
-async def create_codespace_endpoint(request: CodespaceRequest, http_request: Request):
-    """Create a new codespace for a problem"""
+async def create_codespace_endpoint(
+    request: CodespaceRequest, http_request: Request, db: Session = Depends(get_db)
+):
+    """Create a new codespace for a problem.
+
+    This creates a new repository from the problem's template in the user's
+    GitHub account, then creates a codespace from that repo.
+    """
     session = get_session_data(http_request)
 
     if not session or "access_token" not in session:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
+    if "user_id" not in session or "user" not in session:
+        raise HTTPException(status_code=401, detail="Session missing user info")
+
+    username = session["user"].get("login")
+    if not username:
+        raise HTTPException(status_code=401, detail="Session missing GitHub username")
+
     try:
         codespace_info = await create_codespace(
-            session["access_token"], request.problem_id
+            access_token=session["access_token"],
+            problem_id=request.problem_id,
+            username=username,
+            user_id=session["user_id"],
+            db=db,
         )
         return codespace_info
     except HTTPException:
@@ -571,15 +649,46 @@ async def get_active_codespace(
 async def delete_codespace_endpoint(
     codespace_name: str,
     http_request: Request,
+    db: Session = Depends(get_db),
 ):
-    """Delete a codespace by name"""
+    """Delete a codespace by name and its associated repository.
+
+    This endpoint:
+    1. Deletes the codespace from GitHub
+    2. Deletes the associated repo that was created for this codespace
+    3. Removes the tracking record from the database
+    """
     session = get_session_data(http_request)
 
     if not session or "access_token" not in session:
         raise HTTPException(status_code=401, detail="Not authenticated")
 
-    await delete_codespace(session["access_token"], codespace_name)
-    return JSONResponse({"status": "deleted"})
+    access_token = session["access_token"]
+
+    # First, delete the codespace
+    await delete_codespace(access_token, codespace_name)
+
+    # Then, find and delete the associated repo
+    user_repo = (
+        db.query(UserRepo).filter(UserRepo.codespace_name == codespace_name).first()
+    )
+
+    if user_repo:
+        try:
+            await delete_user_repo(
+                access_token=access_token,
+                github_username=str(user_repo.github_username),
+                repo_name=str(user_repo.repo_name),
+            )
+        except HTTPException as e:
+            # Log but don't fail if repo deletion fails
+            print(f"Warning: Failed to delete repo {user_repo.repo_name}: {e.detail}")
+
+        # Remove from database regardless
+        db.delete(user_repo)
+        db.commit()
+
+    return JSONResponse({"status": "deleted", "repo_deleted": user_repo is not None})
 
 
 @app.get("/auth/logout")
@@ -608,16 +717,23 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
         .all()
     )
 
-    # Match with problem details
+    # Match with problem details from database
     completed_problems = []
     for cp in completed:
-        problem = next((p for p in SAMPLE_PROBLEMS if p["id"] == cp.problem_id), None)
+        problem = db.query(Problem).filter(Problem.id == cp.problem_id).first()
         if problem:
-            completed_problems.append({**problem, "completed_at": cp.completed_at})
+            completed_problems.append(
+                {
+                    "id": problem.id,
+                    "title": problem.title,
+                    "difficulty": problem.difficulty,
+                    "completed_at": cp.completed_at,
+                }
+            )
 
-    # Stats
+    # Stats - use completed_problems (which only includes valid problems from database)
     stats = {
-        "total": len(completed),
+        "total": len(completed_problems),
         "easy": len([p for p in completed_problems if p["difficulty"] == "Easy"]),
         "medium": len([p for p in completed_problems if p["difficulty"] == "Medium"]),
         "hard": len([p for p in completed_problems if p["difficulty"] == "Hard"]),
@@ -628,15 +744,18 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
     if session.get("access_token"):
         try:
             codespaces = await list_user_codespaces(session["access_token"])
-            # Enrich with problem titles
+            # Enrich with problem titles from database
             for cs in codespaces:
-                problem = next(
-                    (p for p in SAMPLE_PROBLEMS if p["id"] == cs["problem_id"]), None
+                problem = (
+                    db.query(Problem).filter(Problem.id == cs["problem_id"]).first()
                 )
-                cs["problem_title"] = problem["title"] if problem else cs["problem_id"]
+                cs["problem_title"] = problem.title if problem else cs["problem_id"]
         except Exception:
             # If fetching codespaces fails, continue without them
             pass
+
+    # Get total problem count from database
+    total_problems = db.query(Problem).filter(Problem.is_active.is_(True)).count()
 
     return templates.TemplateResponse(
         "dashboard.html",
@@ -646,7 +765,7 @@ async def dashboard(request: Request, db: Session = Depends(get_db)):
             "logged_in": True,
             "completed_problems": completed_problems,
             "stats": stats,
-            "total_problems": len(SAMPLE_PROBLEMS),
+            "total_problems": total_problems,
             "codespaces": codespaces,
         },
     )

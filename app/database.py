@@ -104,6 +104,7 @@ class User(Base):
     login = Column(String, unique=True, index=True)
     name = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
+    hide_completed = Column(Boolean, default=False)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC))
 
     completed_problems = relationship("CompletedProblem", back_populates="user")

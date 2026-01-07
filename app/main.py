@@ -393,18 +393,19 @@ async def home(
     db: Session = Depends(get_db),
     difficulty: str | None = None,
     language: str | None = None,
-    hide_completed: str | None = None,
 ):
     """Main page listing coding problems"""
     session = get_session_data(request)
 
-    # Parse hide_completed as boolean
-    hide_completed_bool = hide_completed == "true"
-
-    # Get completed problem IDs for logged in user
+    # Get user's hide_completed preference from database
+    hide_completed_bool = False
     completed_ids = set()
     active_codespaces = {}  # Maps problem_id -> codespace web_url
     if session and "user_id" in session:
+        user = db.query(User).filter(User.id == session["user_id"]).first()
+        if user:
+            hide_completed_bool = user.hide_completed
+
         completed = (
             db.query(CompletedProblem)
             .filter(CompletedProblem.user_id == session["user_id"])
@@ -823,6 +824,29 @@ async def unmark_complete(
     db.commit()
 
     return JSONResponse({"status": "removed"})
+
+
+@app.put("/user/preferences/hide-completed")
+async def update_hide_completed(request: Request, db: Session = Depends(get_db)):
+    """Update user's hide_completed preference"""
+    session = get_session_data(request)
+
+    if not session or "user_id" not in session:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    user_id = session["user_id"]
+
+    # Parse request body
+    body = await request.json()
+    hide_completed = body.get("hide_completed", False)
+
+    # Update user preference
+    user = db.query(User).filter(User.id == user_id).first()
+    if user:
+        user.hide_completed = hide_completed
+        db.commit()
+
+    return JSONResponse({"status": "updated", "hide_completed": hide_completed})
 
 
 if __name__ == "__main__":

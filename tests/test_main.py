@@ -1122,13 +1122,41 @@ class TestMarkCompleteToggleUI:
         # The slow-api problem card should not have the green check icon
         # (but two-sum might if it was completed in another test)
 
+    def test_update_hide_completed_preference(self, authenticated_client):
+        """Test updating hide_completed preference via API"""
+        # Set preference to true
+        response = authenticated_client.put(
+            "/user/preferences/hide-completed", json={"hide_completed": True}
+        )
+        assert response.status_code == 200
+        assert response.json()["hide_completed"] is True
+
+        # Set preference to false
+        response = authenticated_client.put(
+            "/user/preferences/hide-completed", json={"hide_completed": False}
+        )
+        assert response.status_code == 200
+        assert response.json()["hide_completed"] is False
+
+    def test_update_hide_completed_unauthenticated(self, client):
+        """Test that unauthenticated users cannot update preference"""
+        response = client.put(
+            "/user/preferences/hide-completed", json={"hide_completed": True}
+        )
+        assert response.status_code == 401
+
     def test_hide_completed_filter_works(self, authenticated_client):
         """Test that hide_completed filter removes completed problems from list"""
         # Mark a problem as complete
         authenticated_client.post("/problems/two-sum/complete")
 
-        # Get page with hide_completed=true
-        response = authenticated_client.get("/?hide_completed=true")
+        # Set hide_completed preference via API
+        authenticated_client.put(
+            "/user/preferences/hide-completed", json={"hide_completed": True}
+        )
+
+        # Get page - should use saved preference
+        response = authenticated_client.get("/")
         assert response.status_code == 200
 
         # two-sum should not be in the problems list
@@ -1143,8 +1171,13 @@ class TestMarkCompleteToggleUI:
         # Ensure another is not completed (use slow-api which exists in test seed)
         authenticated_client.delete("/problems/slow-api/complete")
 
-        # Get page with hide_completed=true
-        response = authenticated_client.get("/?hide_completed=true")
+        # Set hide_completed preference via API
+        authenticated_client.put(
+            "/user/preferences/hide-completed", json={"hide_completed": True}
+        )
+
+        # Get page - should use saved preference
+        response = authenticated_client.get("/")
         assert response.status_code == 200
 
         # slow-api should still be in the problems list

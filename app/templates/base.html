@@ -244,12 +244,52 @@
                             icon.className = 'fas fa-check-circle text-green-500';
                             titleRow.insertBefore(icon, titleRow.firstChild);
                         }
+                        // Hide card if hide_completed is enabled
+                        const hideToggle = document.getElementById('hide-completed-toggle');
+                        if (hideToggle && hideToggle.checked) {
+                            card.style.display = 'none';
+                        }
                     }
                 } else {
                     const error = await response.json();
                     alert('Failed to update: ' + (error.detail || 'Unknown error'));
                 }
             } catch (error) {
+                alert('Error: ' + error.message);
+            }
+        }
+
+        // Toggle hide completed preference
+        async function toggleHideCompleted(hideCompleted) {
+            try {
+                // Save preference to server
+                const response = await fetch('/user/preferences/hide-completed', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ hide_completed: hideCompleted })
+                });
+
+                if (response.ok) {
+                    // Toggle visibility of completed problem cards
+                    const cards = document.querySelectorAll('.problem-card');
+                    cards.forEach(card => {
+                        const checkIcon = card.querySelector('.fa-check-circle.text-green-500');
+                        if (checkIcon) {
+                            // This is a completed problem
+                            card.style.display = hideCompleted ? 'none' : '';
+                        }
+                    });
+                } else {
+                    // Revert checkbox on error
+                    document.getElementById('hide-completed-toggle').checked = !hideCompleted;
+                    const error = await response.json();
+                    alert('Failed to save preference: ' + (error.detail || 'Unknown error'));
+                }
+            } catch (error) {
+                // Revert checkbox on error
+                document.getElementById('hide-completed-toggle').checked = !hideCompleted;
                 alert('Error: ' + error.message);
             }
         }

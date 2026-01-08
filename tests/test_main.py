@@ -401,6 +401,10 @@ class TestCreateCodespaceFunction:
             "default_branch": "main",
         }
 
+        # Mock branch check response
+        mock_branch_response = MagicMock()
+        mock_branch_response.status_code = 200
+
         # Mock machines response
         mock_machines_response = MagicMock()
         mock_machines_response.status_code = 200
@@ -418,13 +422,24 @@ class TestCreateCodespaceFunction:
             "created_at": "2024-01-01T00:00:00Z",
         }
 
-        mock_client.return_value.__aenter__.return_value.get.return_value = (
-            mock_machines_response
-        )
+        # Mock config file creation response
+        mock_config_response = MagicMock()
+        mock_config_response.status_code = 201
+
+        # Set up GET responses: branch check, machines
+        mock_client.return_value.__aenter__.return_value.get.side_effect = [
+            mock_branch_response,
+            mock_machines_response,
+        ]
+        # Set up POST responses: repo generation, codespace creation
         mock_client.return_value.__aenter__.return_value.post.side_effect = [
             mock_generate_response,
             mock_creation_response,
         ]
+        # Set up PUT response for config file creation
+        mock_client.return_value.__aenter__.return_value.put.return_value = (
+            mock_config_response
+        )
 
         # Get the user_id as an integer for the function call
         the_user_id: int = user.id  # type: ignore[assignment]
@@ -443,6 +458,9 @@ class TestCreateCodespaceFunction:
         assert result["web_url"] == "https://github.com/codespaces/test"
         assert result["state"] == "Creating"
         assert "repo_name" in result
+
+        # Verify PUT was called for config file creation
+        mock_client.return_value.__aenter__.return_value.put.assert_called_once()
 
 
 class TestDashboard:
@@ -1184,3 +1202,172 @@ class TestMarkCompleteToggleUI:
         problems = response.context["problems"]
         problem_ids = [p["id"] for p in problems]
         assert "slow-api" in problem_ids
+
+
+class TestTokenBasedCompletion:
+    """Test the token-based /api/complete endpoint for codespace callbacks"""
+
+    def test_complete_with_valid_token(self, client, db_session):
+        """Test successful completion with valid token"""
+        from datetime import UTC, datetime, timedelta
+
+        from app.database import CodespaceToken, User
+
+        # Create a user
+        user = User(
+            github_id=12345,
+            login="tokenuser",
+            name="Token User",
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+
+        # Create a valid token
+        token = CodespaceToken(
+            token="valid_test_token_12345",
+            user_id=user.id,
+            problem_id="two-sum",
+            codespace_name="test-codespace",
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        db_session.add(token)
+        db_session.commit()
+
+        response = client.post(
+            "/api/complete",
+            json={"token": "valid_test_token_12345"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "completed"
+        assert data["problem_id"] == "two-sum"
+
+    def test_complete_with_invalid_token(self, client):
+        """Test completion with invalid token returns 401"""
+        response = client.post(
+            "/api/complete",
+            json={"token": "invalid_token_that_does_not_exist"},
+        )
+
+        assert response.status_code == 401
+        assert "Invalid token" in response.json()["detail"]
+
+    def test_complete_with_expired_token(self, client, db_session):
+        """Test completion with expired token returns 401"""
+        from datetime import UTC, datetime, timedelta
+
+        from app.database import CodespaceToken, User
+
+        # Create a user
+        user = User(
+            github_id=12346,
+            login="expireduser",
+            name="Expired User",
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+
+        # Create an expired token
+        token = CodespaceToken(
+            token="expired_test_token_12345",
+            user_id=user.id,
+            problem_id="two-sum",
+            codespace_name="test-codespace-2",
+            expires_at=datetime.now(UTC) - timedelta(days=1),  # Expired yesterday
+        )
+        db_session.add(token)
+        db_session.commit()
+
+        response = client.post(
+            "/api/complete",
+            json={"token": "expired_test_token_12345"},
+        )
+
+        assert response.status_code == 401
+        assert "expired" in response.json()["detail"].lower()
+
+    def test_complete_already_completed(self, client, db_session):
+        """Test completing an already completed problem returns appropriate status"""
+        from datetime import UTC, datetime, timedelta
+
+        from app.database import CodespaceToken, CompletedProblem, User
+
+        # Create a user
+        user = User(
+            github_id=12347,
+            login="alreadyuser",
+            name="Already User",
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+
+        # Create a completed problem record
+        completed = CompletedProblem(
+            user_id=user.id,
+            problem_id="two-sum",
+        )
+        db_session.add(completed)
+
+        # Create a valid token
+        token = CodespaceToken(
+            token="already_complete_token_12345",
+            user_id=user.id,
+            problem_id="two-sum",
+            codespace_name="test-codespace-3",
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+        )
+        db_session.add(token)
+        db_session.commit()
+
+        response = client.post(
+            "/api/complete",
+            json={"token": "already_complete_token_12345"},
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "already_completed"
+        assert data["problem_id"] == "two-sum"
+
+    def test_complete_marks_token_as_used(self, client, db_session):
+        """Test that completing marks the token as used"""
+        from datetime import UTC, datetime, timedelta
+
+        from app.database import CodespaceToken, User
+
+        # Create a user
+        user = User(
+            github_id=12348,
+            login="useduser",
+            name="Used User",
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+
+        # Create a valid token
+        token = CodespaceToken(
+            token="mark_used_token_12345",
+            user_id=user.id,
+            problem_id="slow-api",
+            codespace_name="test-codespace-4",
+            expires_at=datetime.now(UTC) + timedelta(days=1),
+            used=False,
+        )
+        db_session.add(token)
+        db_session.commit()
+
+        response = client.post(
+            "/api/complete",
+            json={"token": "mark_used_token_12345"},
+        )
+
+        assert response.status_code == 200
+
+        # Refresh the token to check if it was marked as used
+        db_session.refresh(token)
+        assert token.used is True

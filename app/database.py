@@ -160,6 +160,24 @@ class Problem(Base):
     )
 
 
+class CodespaceToken(Base):
+    """Tokens for codespaces to call back to mark problems complete."""
+
+    __tablename__ = "codespace_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    token = Column(String, unique=True, index=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=False)
+    problem_id = Column(String, ForeignKey("problems.id"), index=True, nullable=False)
+    codespace_name = Column(String, index=True, nullable=False)
+    used = Column(Boolean, default=False)  # Track if token has been used
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+    expires_at = Column(DateTime, nullable=False)  # Token expiration time
+
+    user = relationship("User")
+    problem = relationship("Problem")
+
+
 def init_db():
     """Create all tables and seed initial data"""
     Base.metadata.create_all(bind=get_engine())

@@ -1,6 +1,7 @@
 import os
 import secrets
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -13,7 +14,15 @@ from itsdangerous import BadSignature, URLSafeTimedSerializer
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from .database import CompletedProblem, Problem, User, UserRepo, get_db, init_db
+from .database import (
+    CodespaceToken,
+    CompletedProblem,
+    Problem,
+    User,
+    UserRepo,
+    get_db,
+    init_db,
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -36,6 +45,7 @@ GITHUB_REDIRECT_URI = os.getenv(
     "GITHUB_REDIRECT_URI", "http://localhost:8000/auth/callback"
 )
 SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-in-production")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
 # Session management
 serializer = URLSafeTimedSerializer(SECRET_KEY)
@@ -162,7 +172,44 @@ async def create_codespace(
                     detail="Repository created but branch not available. Please try again.",
                 )
 
-        # Step 2: Get available machine types for the new repository
+        # Step 2: Create config file with completion token BEFORE creating codespace
+        # This ensures the token is available when the codespace container starts
+        completion_token = secrets.token_urlsafe(32)
+        token_expires_at = datetime.now(UTC) + timedelta(days=7)  # 7 day expiry
+
+        # Create the config file content
+        config_content = f"""# LLMeetCode Configuration
+# This file was auto-generated when the codespace was created.
+# DO NOT EDIT or share this file - it contains your authentication token.
+
+LLMEETCODE_TOKEN={completion_token}
+LLMEETCODE_PROBLEM_ID={problem_id}
+LLMEETCODE_API_URL={API_BASE_URL}
+"""
+        # Base64 encode the content for GitHub Contents API
+        import base64
+
+        config_content_b64 = base64.b64encode(config_content.encode()).decode()
+
+        # Create the .llmeetcode-config file in the repo
+        config_response = await client.put(
+            f"https://api.github.com/repos/{new_repo_full_name}/contents/.llmeetcode-config",
+            json={
+                "message": "Add LLMeetCode configuration",
+                "content": config_content_b64,
+                "branch": default_branch,
+            },
+            headers=headers,
+        )
+
+        if config_response.status_code not in (200, 201):
+            # Log warning but continue - the codespace can still be created
+            print(
+                f"Warning: Failed to create .llmeetcode-config: "
+                f"{config_response.status_code} {config_response.text}"
+            )
+
+        # Step 3: Get available machine types for the new repository
         machines_response = await client.get(
             f"https://api.github.com/repos/{new_repo_full_name}/codespaces/machines",
             headers=headers,
@@ -175,7 +222,7 @@ async def create_codespace(
             if machines and "machines" in machines and len(machines["machines"]) > 0:
                 machine_type = machines["machines"][0]["name"]
 
-        # Step 3: Create the codespace from the new repo
+        # Step 4: Create the codespace from the new repo
         display_name = f"llmeetcode-{problem_id}-{unique_suffix}"
         codespace_data = {
             "repository_id": repository_id,
@@ -208,7 +255,17 @@ async def create_codespace(
 
         codespace = response.json()
 
-        # Step 4: Track the repo in the database for cleanup later
+        # Step 5: Store token in database (token was already generated before codespace creation)
+        codespace_token = CodespaceToken(
+            token=completion_token,
+            user_id=user_id,
+            problem_id=problem_id,
+            codespace_name=codespace["name"],
+            expires_at=token_expires_at,
+        )
+        db.add(codespace_token)
+
+        # Step 6: Track the repo in the database for cleanup later
         user_repo = UserRepo(
             user_id=user_id,
             github_username=username,
@@ -847,6 +904,80 @@ async def update_hide_completed(request: Request, db: Session = Depends(get_db))
         db.commit()
 
     return JSONResponse({"status": "updated", "hide_completed": hide_completed})
+
+
+class TokenCompleteRequest(BaseModel):
+    token: str
+
+
+@app.post("/api/complete")
+async def complete_with_token(
+    request: TokenCompleteRequest, db: Session = Depends(get_db)
+):
+    """Mark a problem as completed using a codespace token.
+
+    This endpoint is called from within a codespace (e.g., by mark-complete.sh).
+    It validates the token and marks the associated problem as complete for the user.
+
+    The token was injected as a secret when the codespace was created.
+    """
+    # Find the token
+    token_record = (
+        db.query(CodespaceToken).filter(CodespaceToken.token == request.token).first()
+    )
+
+    if not token_record:
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    # Check if token has expired
+    # Handle both timezone-aware and naive datetimes from database
+    now = datetime.now(UTC)
+    expires_at = token_record.expires_at
+    if expires_at.tzinfo is None:
+        # If database returns naive datetime, assume it's UTC
+        expires_at = expires_at.replace(tzinfo=UTC)
+    if now > expires_at:
+        raise HTTPException(status_code=401, detail="Token has expired")
+
+    # Check if already used (optional: allow multiple uses)
+    # if token_record.used:
+    #     raise HTTPException(status_code=400, detail="Token already used")
+
+    # Check if already completed
+    existing = (
+        db.query(CompletedProblem)
+        .filter(
+            CompletedProblem.user_id == token_record.user_id,
+            CompletedProblem.problem_id == token_record.problem_id,
+        )
+        .first()
+    )
+
+    if existing:
+        return JSONResponse(
+            {
+                "status": "already_completed",
+                "problem_id": token_record.problem_id,
+            }
+        )
+
+    # Mark as completed
+    completion = CompletedProblem(
+        user_id=token_record.user_id,
+        problem_id=token_record.problem_id,
+    )
+    db.add(completion)
+
+    # Mark token as used
+    token_record.used = True
+    db.commit()
+
+    return JSONResponse(
+        {
+            "status": "completed",
+            "problem_id": token_record.problem_id,
+        }
+    )
 
 
 if __name__ == "__main__":

@@ -10,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     create_engine,
+    text,
 )
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker
 
@@ -178,9 +179,44 @@ class CodespaceToken(Base):
     problem = relationship("Problem")
 
 
+def _run_migrations():
+    """Run any pending schema migrations.
+
+    This handles adding new columns to existing tables that SQLAlchemy's
+    create_all() won't add (it only creates missing tables, not columns).
+    """
+    engine = get_engine()
+
+    # List of migrations to apply
+    # Each migration is (check_sql, migrate_sql, description)
+    migrations = [
+        (
+            # Check if column exists
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'users' AND column_name = 'hide_completed'
+            """,
+            # Add column if missing
+            """
+            ALTER TABLE users ADD COLUMN hide_completed BOOLEAN DEFAULT FALSE
+            """,
+            "Add hide_completed column to users table",
+        ),
+    ]
+
+    with engine.connect() as conn:
+        for check_sql, migrate_sql, description in migrations:
+            result = conn.execute(text(check_sql))
+            if result.fetchone() is None:
+                print(f"[Migration] {description}")
+                conn.execute(text(migrate_sql))
+                conn.commit()
+
+
 def init_db():
-    """Create all tables and seed initial data"""
+    """Create all tables, run migrations, and seed initial data"""
     Base.metadata.create_all(bind=get_engine())
+    _run_migrations()
     _seed_initial_data()
 
 

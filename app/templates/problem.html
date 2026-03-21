@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+
+{% block title %}{{ problem.title }} - LLMeetCode{% endblock %}
+
+{% block content %}
+<div class="max-w-5xl mx-auto" data-problem-shell="{{ problem.id }}">
+    <a href="/" class="inline-flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:opacity-80 transition mb-6">
+        <i class="fas fa-arrow-left"></i>
+        Back to problems
+    </a>
+
+    <div class="bg-white dark:bg-gray-800 rounded-2xl shadow-sm overflow-hidden mb-8">
+        {% if creation_success_message %}
+        <div class="border-b border-emerald-200 bg-emerald-50 px-8 py-4 text-sm text-emerald-800 dark:border-emerald-900/70 dark:bg-emerald-950/50 dark:text-emerald-200">
+            {{ creation_success_message }}
+        </div>
+        {% endif %}
+        {% if update_success_message %}
+        <div class="border-b border-emerald-200 bg-emerald-50 px-8 py-4 text-sm text-emerald-800 dark:border-emerald-900/70 dark:bg-emerald-950/50 dark:text-emerald-200">
+            {{ update_success_message }}
+        </div>
+        {% endif %}
+        <div class="p-8 border-b border-gray-100 dark:border-gray-700">
+            <div class="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+                <div class="flex-1">
+                    <div class="flex flex-wrap items-center gap-3 mb-4" data-problem-title-row>
+                        {% if is_completed %}
+                        <i class="fas fa-check-circle text-green-500" data-problem-complete-icon="true"></i>
+                        {% endif %}
+                        <h1 class="text-3xl font-bold text-gray-900 dark:text-white">{{ problem.title }}</h1>
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full {% if problem.difficulty == 'Easy' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200{% elif problem.difficulty == 'Medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200{% else %}bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200{% endif %}">
+                            {{ problem.difficulty }}
+                        </span>
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200">
+                            {{ problem.language }}
+                        </span>
+                    </div>
+                    <p class="text-lg text-gray-700 dark:text-gray-300 mb-4">{{ detail_summary }}</p>
+                    <p class="text-sm text-gray-500 dark:text-gray-400">{{ problem.description }}</p>
+                    {% if problem.domain_specialization %}
+                    <div class="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-slate-700 dark:bg-slate-900 dark:text-slate-300">
+                        <i class="fas fa-layer-group text-[11px]"></i>
+                        {{ problem.domain_specialization }}
+                    </div>
+                    {% endif %}
+                </div>
+
+                <div class="w-full lg:w-72 shrink-0">
+                    <div class="rounded-xl bg-gray-50 dark:bg-gray-900/60 p-4 border border-gray-100 dark:border-gray-700">
+                        <p class="text-xs font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400 mb-3">Actions</p>
+                        <div class="flex flex-col gap-3">
+                            {% if active_codespace_url %}
+                            <a href="{{ active_codespace_url }}" class="bg-green-600 text-white px-4 py-3 rounded-md font-medium hover:bg-green-700 transition flex items-center justify-center gap-2">
+                                <i class="fas fa-redo"></i>
+                                Resume Codespace
+                            </a>
+                            {% else %}
+                            <button onclick="openCodespace('{{ problem.id }}')" class="bg-blue-600 text-white px-4 py-3 rounded-md font-medium hover:bg-blue-700 transition flex items-center justify-center gap-2">
+                                <i class="fab fa-github"></i>
+                                Open in Codespaces
+                            </button>
+                            {% endif %}
+                            {% if logged_in %}
+                            <button
+                                data-problem-id="{{ problem.id }}"
+                                data-problem-complete-button
+                                onclick="toggleComplete('{{ problem.id }}', {{ 'true' if is_completed else 'false' }})"
+                                class="{% if is_completed %}bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %} px-4 py-3 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center">
+                                <i class="fas {% if is_completed %}fa-check-circle{% else %}fa-circle{% endif %}"></i>
+                                {% if is_completed %}Completed{% else %}Mark Complete{% endif %}
+                            </button>
+                            <div class="mt-2 border-t border-gray-200 pt-3 dark:border-gray-700">
+                                <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Manage problem</p>
+                                <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
+                                    <a href="/problems/{{ problem.id }}/edit" class="inline-flex items-center justify-center gap-2 rounded-md border border-gray-300 px-4 py-3 text-sm font-medium text-gray-700 transition hover:bg-gray-100 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700">
+                                        <i class="fas fa-pen"></i>
+                                        Edit problem
+                                    </a>
+                                    <a href="/problems/{{ problem.id }}/delete" class="inline-flex items-center justify-center gap-2 rounded-md border border-red-300 px-4 py-3 text-sm font-medium text-red-700 transition hover:bg-red-50 dark:border-red-900/70 dark:text-red-300 dark:hover:bg-red-950/40">
+                                        <i class="fas fa-trash"></i>
+                                        Delete problem
+                                    </a>
+                                </div>
+                            </div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid gap-8 p-8 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]">
+            <section>
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Overview</h2>
+                <div class="space-y-4 text-gray-700 dark:text-gray-300 leading-7">
+                    {% for paragraph in overview_paragraphs %}
+                    <p>{{ paragraph }}</p>
+                    {% endfor %}
+                </div>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white mb-4">Solution submissions</h2>
+                {% if solution_submissions %}
+                <div class="space-y-6">
+                    {% for submission in solution_submissions %}
+                    <article class="rounded-xl border border-gray-100 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/60 p-4">
+                        <h3 class="text-base font-semibold text-gray-900 dark:text-white mb-3">{{ submission.title }}</h3>
+                        <div class="aspect-video overflow-hidden rounded-lg bg-black mb-3">
+                            <iframe
+                                src="{{ submission.embed_url }}"
+                                title="{{ submission.title }}"
+                                class="w-full h-full"
+                                loading="lazy"
+                                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                allowfullscreen></iframe>
+                        </div>
+                        <a href="{{ submission.video_url }}" class="text-sm font-medium text-blue-600 dark:text-blue-400 hover:opacity-80 transition">
+                            Watch on YouTube
+                        </a>
+                    </article>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="rounded-xl border border-dashed border-gray-300 dark:border-gray-600 p-6 text-sm text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-gray-900/40">
+                    No solution videos yet. Check back later for walkthroughs and submission examples.
+                </div>
+                {% endif %}
+            </section>
+        </div>
+    </div>
+</div>
+{% endblock %}

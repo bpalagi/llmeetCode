@@ -2,9 +2,48 @@
 
 {% block content %}
 <div class="mb-8">
-    <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Coding Challenges</h2>
-    <p class="text-gray-600 dark:text-gray-400">Practice real-world coding problems in a professional development environment</p>
+    {% if delete_success_message %}
+    <div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 dark:border-emerald-900/80 dark:bg-emerald-950/50 dark:text-emerald-200">
+        {{ delete_success_message }}
+    </div>
+    {% endif %}
+    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+            <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-2">Coding Challenges</h2>
+            <p class="text-gray-600 dark:text-gray-400">Practice real-world coding problems in a professional development environment</p>
+        </div>
+        {% if logged_in %}
+        <a href="/problems/new" class="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700">
+            <i class="fas fa-plus"></i>
+            Add a Problem
+        </a>
+        {% endif %}
+    </div>
 </div>
+
+{% if logged_in and inactive_problems %}
+<div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/60 dark:bg-amber-950/30">
+    <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+        <div>
+            <h3 class="text-sm font-semibold uppercase tracking-[0.18em] text-amber-700 dark:text-amber-300">Inactive problems</h3>
+            <p class="mt-2 max-w-3xl text-sm text-amber-900 dark:text-amber-100">These problems are hidden from candidates. Open them here to edit, reactivate, or delete them.</p>
+        </div>
+    </div>
+    <div class="mt-4 grid gap-3 md:grid-cols-2">
+        {% for problem in inactive_problems %}
+        <a href="/problems/{{ problem.id }}/edit" class="rounded-xl border border-amber-200 bg-white px-4 py-3 transition hover:border-amber-300 hover:bg-amber-100/40 dark:border-amber-900/70 dark:bg-gray-800 dark:hover:bg-gray-700">
+            <div class="flex items-center justify-between gap-3">
+                <div>
+                    <p class="font-semibold text-gray-900 dark:text-white">{{ problem.title }}</p>
+                    <p class="mt-1 text-xs text-gray-600 dark:text-gray-300">{{ problem.id }} • {{ problem.difficulty }} • {{ problem.language }}</p>
+                </div>
+                <span class="text-sm font-medium text-amber-700 dark:text-amber-300">Manage</span>
+            </div>
+        </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
 
 <!-- Filters -->
 <div class="bg-white dark:bg-gray-800 rounded-lg shadow-sm p-4 mb-6">
@@ -37,14 +76,18 @@
 <!-- Problem List -->
 <div class="grid gap-4">
     {% for problem in problems %}
-    <div class="problem-card bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 difficulty-{{ problem.difficulty.lower() }}">
+    <div class="problem-card bg-white dark:bg-gray-800 rounded-lg shadow-sm p-6 difficulty-{{ problem.difficulty.lower() }}" data-problem-shell="{{ problem.id }}" data-problem-card="true">
         <div class="flex items-start justify-between">
             <div class="flex-1">
-                <div class="flex items-center gap-3 mb-2">
+                <div class="flex items-center gap-3 mb-2" data-problem-title-row>
                     {% if problem.id in completed_ids %}
-                    <i class="fas fa-check-circle text-green-500"></i>
+                    <i class="fas fa-check-circle text-green-500" data-problem-complete-icon="true"></i>
                     {% endif %}
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">{{ problem.title }}</h3>
+                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">
+                        <a href="/problems/{{ problem.id }}" class="hover:text-blue-600 dark:hover:text-blue-400 transition">
+                            {{ problem.title }}
+                        </a>
+                    </h3>
                     <span class="px-2 py-1 text-xs font-medium rounded-full
                         {% if problem.difficulty == 'Easy' %}bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200
                         {% elif problem.difficulty == 'Medium' %}bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200
@@ -55,6 +98,9 @@
                 <p class="text-gray-600 dark:text-gray-400 mb-3">{{ problem.description }}</p>
                 <div class="flex items-center gap-4 text-sm text-gray-500 dark:text-gray-400">
                     <span><i class="fas fa-code mr-1"></i>{{ problem.language }}</span>
+                    <a href="/problems/{{ problem.id }}" class="text-blue-600 dark:text-blue-400 font-medium hover:opacity-80 transition">
+                        View details <i class="fas fa-arrow-right ml-1 text-xs"></i>
+                    </a>
                 </div>
             </div>
             <div class="ml-4 flex flex-col gap-2">
@@ -75,6 +121,7 @@
                 {% if logged_in %}
                 <button
                     data-problem-id="{{ problem.id }}"
+                    data-problem-complete-button
                     onclick="toggleComplete('{{ problem.id }}', {{ 'true' if problem.id in completed_ids else 'false' }})"
                     class="{% if problem.id in completed_ids %}bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300{% else %}bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300{% endif %} px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center">
                     <i class="fas {% if problem.id in completed_ids %}fa-check-circle{% else %}fa-circle{% endif %}"></i>

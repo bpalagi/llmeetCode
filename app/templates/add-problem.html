@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+
+{% block title %}{{ page_title }} - LLMeetCode{% endblock %}
+
+{% block content %}
+<div class="mx-auto max-w-5xl">
+    <div class="mb-8 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+        <div>
+            <p class="mb-2 text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400">{{ page_eyebrow }}</p>
+            <h1 class="text-3xl font-bold text-gray-900 dark:text-white">{{ page_title }}</h1>
+            <p class="mt-3 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300">
+                {{ page_description }}
+            </p>
+        </div>
+        <a href="/" class="inline-flex items-center gap-2 text-sm font-medium text-blue-600 dark:text-blue-400 hover:opacity-80 transition">
+            <i class="fas fa-arrow-left"></i>
+            Back to catalog
+        </a>
+    </div>
+
+    {% if success_message %}
+    <div class="mb-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-sm text-emerald-800 dark:border-emerald-900/80 dark:bg-emerald-950/50 dark:text-emerald-200">
+        {{ success_message }}
+    </div>
+    {% endif %}
+
+    {% if errors %}
+    <div class="mb-6 rounded-2xl border border-amber-200 bg-amber-50 px-5 py-4 text-sm text-amber-900 dark:border-amber-900/80 dark:bg-amber-950/50 dark:text-amber-200">
+        Fix the highlighted fields and try again.
+    </div>
+    {% endif %}
+
+    <form method="post" action="{{ form_action }}" class="space-y-6">
+        <section class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Catalog metadata</h2>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">These fields power the main catalog card and the problem identity used across the app.</p>
+            </div>
+            <div class="grid gap-5 md:grid-cols-2">
+                <div>
+                    <label for="problem_id" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Problem id / slug</label>
+                    <input id="problem_id" name="problem_id" value="{{ form_data.problem_id }}" {% if problem_id_locked %}readonly aria-readonly="true"{% endif %} class="w-full rounded-xl border {% if errors.problem_id %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} {% if problem_id_locked %}bg-gray-100 dark:bg-gray-700{% else %}bg-white dark:bg-gray-900{% endif %} px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:text-white" placeholder="slow-api" />
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{% if problem_id_locked %}This slug is locked after creation because other app records reference it directly.{% else %}Use lowercase letters, numbers, and hyphens. This becomes the URL and database id.{% endif %}</p>
+                    {% if errors.problem_id %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.problem_id }}</p>{% endif %}
+                </div>
+                <div>
+                    <label for="title" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Title</label>
+                    <input id="title" name="title" value="{{ form_data.title }}" class="w-full rounded-xl border {% if errors.title %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="Slow API Performance" />
+                    {% if errors.title %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.title }}</p>{% endif %}
+                </div>
+                <div class="md:col-span-2">
+                    <label for="description" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Short description</label>
+                    <textarea id="description" name="description" rows="3" class="w-full rounded-xl border {% if errors.description %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="A one-paragraph catalog summary that helps someone decide whether to open the detail page.">{{ form_data.description }}</textarea>
+                    {% if errors.description %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.description }}</p>{% endif %}
+                </div>
+                <div>
+                    <label for="difficulty" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Difficulty</label>
+                    <select id="difficulty" name="difficulty" class="w-full rounded-xl border {% if errors.difficulty %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white">
+                        {% for option in difficulty_options %}
+                        <option value="{{ option }}" {% if form_data.difficulty == option %}selected{% endif %}>{{ option }}</option>
+                        {% endfor %}
+                    </select>
+                    {% if errors.difficulty %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.difficulty }}</p>{% endif %}
+                </div>
+                <div>
+                    <label for="language" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Language</label>
+                    <input id="language" name="language" list="language-suggestions" value="{{ form_data.language }}" class="w-full rounded-xl border {% if errors.language %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="Python" />
+                    <datalist id="language-suggestions">
+                        {% for option in language_suggestions %}
+                        <option value="{{ option }}"></option>
+                        {% endfor %}
+                    </datalist>
+                    {% if errors.language %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.language }}</p>{% endif %}
+                </div>
+                <div class="md:col-span-2">
+                    <span class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Active status</span>
+                    <div class="grid gap-3 sm:grid-cols-2">
+                        <label class="rounded-xl border {% if errors.is_active %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-gray-50 p-4 text-sm text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                            <input type="radio" name="is_active" value="true" class="mr-2" {% if form_data.is_active == 'true' %}checked{% endif %} />
+                            Active now
+                            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">Show this problem in the catalog right away.</span>
+                        </label>
+                        <label class="rounded-xl border {% if errors.is_active %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-gray-50 p-4 text-sm text-gray-700 dark:bg-gray-900/60 dark:text-gray-200">
+                            <input type="radio" name="is_active" value="false" class="mr-2" {% if form_data.is_active == 'false' %}checked{% endif %} />
+                            Keep inactive
+                            <span class="mt-1 block text-xs text-gray-500 dark:text-gray-400">Save the problem without exposing it in the catalog yet.</span>
+                        </label>
+                    </div>
+                    {% if errors.is_active %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.is_active }}</p>{% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Detail-page content</h2>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">This content shapes the dedicated problem page and gives candidates the scenario context before they launch a Codespace.</p>
+            </div>
+            <div class="grid gap-5">
+                <div>
+                    <label for="detail_summary" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Detail summary</label>
+                    <textarea id="detail_summary" name="detail_summary" rows="3" class="w-full rounded-xl border {% if errors.detail_summary %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="A short hero summary for the problem page.">{{ form_data.detail_summary }}</textarea>
+                    {% if errors.detail_summary %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.detail_summary }}</p>{% endif %}
+                </div>
+                <div>
+                    <label for="detail_overview" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Detail overview / body</label>
+                    <textarea id="detail_overview" name="detail_overview" rows="8" class="w-full rounded-xl border {% if errors.detail_overview %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="Long-form scenario context. Separate paragraphs with blank lines for cleaner rendering.">{{ form_data.detail_overview }}</textarea>
+                    {% if errors.detail_overview %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.detail_overview }}</p>{% endif %}
+                </div>
+                <div>
+                    <label for="domain_specialization" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Domain specialization</label>
+                    <input id="domain_specialization" name="domain_specialization" value="{{ form_data.domain_specialization }}" class="w-full rounded-xl border {% if errors.domain_specialization %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="API performance investigation" />
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Explain the real-world discipline or focus area this exercise is meant to simulate.</p>
+                    {% if errors.domain_specialization %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.domain_specialization }}</p>{% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+            <div class="mb-6">
+                <h2 class="text-xl font-semibold text-gray-900 dark:text-white">Runtime setup</h2>
+                <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">Codespace launch depends on this repository being valid and ready to generate per-user repos.</p>
+            </div>
+            <div class="grid gap-5 md:grid-cols-2">
+                <div class="md:col-span-2">
+                    <label for="template_repo" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Template repo</label>
+                    <input id="template_repo" name="template_repo" value="{{ form_data.template_repo }}" class="w-full rounded-xl border {% if errors.template_repo %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="owner/problem-template" />
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">Point to a GitHub template repository in `owner/repository` format. It must contain `.devcontainer/devcontainer.json` so Codespaces can open cleanly.</p>
+                    {% if errors.template_repo %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.template_repo }}</p>{% endif %}
+                </div>
+                <div class="md:col-span-2">
+                    <label for="youtube_url" class="mb-2 block text-sm font-medium text-gray-900 dark:text-gray-100">Optional YouTube URL</label>
+                    <input id="youtube_url" name="youtube_url" value="{{ form_data.youtube_url }}" class="w-full rounded-xl border {% if errors.youtube_url %}border-red-500{% else %}border-gray-300 dark:border-gray-600{% endif %} bg-white px-4 py-3 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:bg-gray-900 dark:text-white" placeholder="https://youtube.com/live/..." />
+                    <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">If provided, this becomes the initial embedded detail-page video using the existing solution-submission system.</p>
+                    {% if errors.youtube_url %}<p class="mt-2 text-sm text-red-600 dark:text-red-400">{{ errors.youtube_url }}</p>{% endif %}
+                </div>
+            </div>
+        </section>
+
+        <div class="flex flex-col gap-3 pb-8 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-sm text-gray-500 dark:text-gray-400">{% if authoring_mode == 'edit' %}Saving updates the problem and managed walkthrough atomically.{% else %}Saving creates the problem and optional walkthrough atomically.{% endif %}</p>
+            <button type="submit" class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-blue-700">
+                <i class="fas {% if authoring_mode == 'edit' %}fa-save{% else %}fa-plus{% endif %}"></i>
+                {{ submit_label }}
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

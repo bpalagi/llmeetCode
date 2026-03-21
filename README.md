@@ -10,58 +10,37 @@ A modern coding interview platform that provides browser-based development envir
 - **Secure Authentication**: GitHub OAuth with encrypted session management
 - **Dynamic Repo Creation**: Creates a private repo from template in user's account for each problem
 
-## Quick Start
+## Run Locally
 
 ### Prerequisites
 
 - Python 3.11+
 - PostgreSQL
 
-**Install PostgreSQL (macOS):**
+On macOS:
+
 ```bash
 brew install postgresql@15
 brew services start postgresql@15
-```
-
-**Create the database:**
-```bash
 createdb llmeetcode
 ```
 
-**Stop PostgreSQL (when not needed):**
-```bash
-brew services stop postgresql@15
-```
+### Setup and run
 
-### Setup
-
-1. Create a virtual environment:
 ```bash
-python -m venv .venv
-```
-
-2. Activate the virtual environment:
-```bash
+python3 -m venv .venv
 source .venv/bin/activate
-```
-
-3. Install dependencies:
-```bash
 pip install -r requirements.txt
-```
-
-4. Set up environment variables:
-```bash
-cp .env.example .env
-# Edit .env with your GitHub OAuth credentials
-```
-
-5. Run the application:
-```bash
 python -m app.main
 ```
 
-The app will be available at `http://localhost:8000`
+The app runs at `http://localhost:8000`.
+
+Notes:
+
+- The virtualenv activate script is `source .venv/bin/activate` (not `venv/activate`).
+- Start the app with `python -m app.main` from the repo root; `python main.py` will fail because the entrypoint lives at `app/main.py`.
+- `.env.example` already points at the local Postgres database `postgresql://localhost/llmeetcode`.
 
 ### Running Tests
 

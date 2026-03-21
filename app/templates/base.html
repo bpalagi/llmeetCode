@@ -220,36 +220,44 @@
                 });
 
                 if (response.ok) {
-                    // Update UI in place without page reload
-                    const button = document.querySelector(`button[data-problem-id="${problemId}"]`);
-                    const card = button.closest('.problem-card');
-                    const titleRow = card.querySelector('.flex.items-center.gap-3.mb-2');
+                    const nextCompletedState = !isCompleted;
+                    const wrappers = document.querySelectorAll(`[data-problem-shell="${problemId}"]`);
 
-                    if (isCompleted) {
-                        // Was completed, now uncompleted
-                        button.className = 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300 px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center';
-                        button.innerHTML = '<i class="fas fa-circle"></i> Mark Complete';
-                        button.setAttribute('onclick', `toggleComplete('${problemId}', false)`);
-                        // Remove check icon from title
-                        const checkIcon = titleRow.querySelector('.fa-check-circle');
-                        if (checkIcon) checkIcon.remove();
-                    } else {
-                        // Was not completed, now completed
-                        button.className = 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center';
-                        button.innerHTML = '<i class="fas fa-check-circle"></i> Completed';
-                        button.setAttribute('onclick', `toggleComplete('${problemId}', true)`);
-                        // Add check icon to title if not present
-                        if (!titleRow.querySelector('.fa-check-circle')) {
-                            const icon = document.createElement('i');
-                            icon.className = 'fas fa-check-circle text-green-500';
-                            titleRow.insertBefore(icon, titleRow.firstChild);
+                    wrappers.forEach(wrapper => {
+                        const button = wrapper.querySelector('[data-problem-complete-button]');
+                        const titleRow = wrapper.querySelector('[data-problem-title-row]');
+
+                        if (button) {
+                            button.className = `${nextCompletedState
+                                ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                : 'bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-300'} px-4 py-2 rounded-md font-medium hover:opacity-80 transition flex items-center gap-2 justify-center`;
+                            button.innerHTML = nextCompletedState
+                                ? '<i class="fas fa-check-circle"></i> Completed'
+                                : '<i class="fas fa-circle"></i> Mark Complete';
+                            button.setAttribute('onclick', `toggleComplete('${problemId}', ${nextCompletedState})`);
                         }
-                        // Hide card if hide_completed is enabled
-                        const hideToggle = document.getElementById('hide-completed-toggle');
-                        if (hideToggle && hideToggle.checked) {
-                            card.style.display = 'none';
+
+                        if (titleRow) {
+                            const existingIcon = titleRow.querySelector('[data-problem-complete-icon]');
+                            if (nextCompletedState && !existingIcon) {
+                                const icon = document.createElement('i');
+                                icon.className = 'fas fa-check-circle text-green-500';
+                                icon.setAttribute('data-problem-complete-icon', 'true');
+                                titleRow.insertBefore(icon, titleRow.firstChild);
+                            } else if (!nextCompletedState && existingIcon) {
+                                existingIcon.remove();
+                            }
                         }
-                    }
+
+                        if (wrapper.hasAttribute('data-problem-card')) {
+                            const hideToggle = document.getElementById('hide-completed-toggle');
+                            if (hideToggle && hideToggle.checked && nextCompletedState) {
+                                wrapper.style.display = 'none';
+                            } else {
+                                wrapper.style.display = '';
+                            }
+                        }
+                    });
                 } else {
                     const error = await response.json();
                     alert('Failed to update: ' + (error.detail || 'Unknown error'));

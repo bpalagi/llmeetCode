@@ -1,5 +1,7 @@
 import os
 from datetime import UTC, datetime
+from typing import Any
+from urllib.parse import parse_qs, urlparse
 
 from sqlalchemy import (
     Boolean,
@@ -12,7 +14,7 @@ from sqlalchemy import (
     create_engine,
     text,
 )
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 
 def get_database_url(url: str | None = None) -> str:
@@ -96,6 +98,59 @@ def reset_database():
 
 Base = declarative_base()
 
+SLOW_API_DETAIL_SUMMARY = (
+    "Enterprise customers report that the Recent Orders dashboard has regressed "
+    "from near-instant responses to 3-4 second loads and occasional timeouts. "
+    "Investigate the orders API, isolate the bottleneck, and restore healthy "
+    "latency without breaking the existing test suite."
+)
+
+SLOW_API_DETAIL_OVERVIEW = (
+    "Multiple enterprise customers have escalated slow response times when "
+    "loading the Recent Orders dashboard. Customer Success flagged the issue "
+    "because it is now affecting the largest accounts and interrupting daily "
+    "operations.\n\n"
+    'Support reports include: "The recent orders page takes forever to load. '
+    'It used to be instant." from Foo Corp, "Dashboard performance has degraded '
+    'significantly. Sometimes it takes 3-4 seconds to show our orders." from '
+    "GlobalTrade Ltd, and \"We're seeing timeouts on the orders API when "
+    'fetching recent orders." from MegaRetail Inc.\n\n'
+    "Your goal is to identify the impacted endpoint or endpoints, determine the "
+    "root cause of the slowdown, and implement a fix that brings response times "
+    "back under 100ms. Use the repository README for setup instructions, keep "
+    "existing tests green, and document your investigation as you work."
+)
+
+SLOW_API_DOMAIN_SPECIALIZATION = "API performance investigation"
+
+MANAGED_PROBLEM_WALKTHROUGH_TITLE = "Problem walkthrough"
+LEGACY_MANAGED_PROBLEM_WALKTHROUGH_TITLES = ("Slow API walkthrough",)
+SLOW_API_SOLUTION_VIDEO_TITLE = MANAGED_PROBLEM_WALKTHROUGH_TITLE
+SLOW_API_SOLUTION_VIDEO_URL = "https://youtube.com/live/dtjqMNyNPiw?feature=share"
+
+
+def normalize_youtube_embed_url(video_url: str) -> str:
+    """Normalize supported YouTube URLs into a stable embed URL."""
+    parsed = urlparse(video_url)
+    host = (parsed.netloc or "").lower()
+    path = parsed.path.strip("/")
+
+    video_id = ""
+
+    if host in {"youtu.be", "www.youtu.be"}:
+        video_id = path.split("/")[0]
+    elif host.endswith("youtube.com"):
+        if path == "watch":
+            video_id = parse_qs(parsed.query).get("v", [""])[0]
+        elif path.startswith("live/") or path.startswith("embed/"):
+            video_id = path.split("/", 1)[1]
+
+    if not video_id:
+        return video_url
+
+    video_id = video_id.split("?", 1)[0].split("&", 1)[0]
+    return f"https://www.youtube.com/embed/{video_id}"
+
 
 class User(Base):
     __tablename__ = "users"
@@ -151,6 +206,9 @@ class Problem(Base):
     id = Column(String, primary_key=True, index=True)  # e.g., "slow-api"
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
+    detail_summary = Column(Text, nullable=True)
+    detail_overview = Column(Text, nullable=True)
+    domain_specialization = Column(Text, nullable=True)
     difficulty = Column(String, nullable=False)  # Easy, Medium, Hard
     language = Column(String, nullable=False)  # Java, Python, etc.
     template_repo = Column(String, nullable=False)  # e.g., "bpalagi/slow-api-template"
@@ -159,6 +217,32 @@ class Problem(Base):
     updated_at = Column(
         DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC)
     )
+
+    solution_submissions = relationship(
+        "ProblemSolutionSubmission",
+        back_populates="problem",
+        order_by=lambda: (
+            ProblemSolutionSubmission.sort_order.asc(),
+            ProblemSolutionSubmission.id.asc(),
+        ),
+    )
+
+
+class ProblemSolutionSubmission(Base):
+    """Embeddable solution videos associated with a problem."""
+
+    __tablename__ = "problem_solution_submissions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    problem_id = Column(String, ForeignKey("problems.id"), index=True, nullable=False)
+    title = Column(String, nullable=False)
+    video_url = Column(Text, nullable=False)
+    embed_url = Column(Text, nullable=False)
+    sort_order = Column(Integer, default=0, nullable=False)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC))
+
+    problem = relationship("Problem", back_populates="solution_submissions")
 
 
 class CodespaceToken(Base):
@@ -177,6 +261,78 @@ class CodespaceToken(Base):
 
     user = relationship("User")
     problem = relationship("Problem")
+
+
+def get_managed_problem_walkthrough_submission(
+    db: Session, problem_id: str
+) -> ProblemSolutionSubmission | None:
+    return (
+        db.query(ProblemSolutionSubmission)
+        .filter(
+            ProblemSolutionSubmission.problem_id == problem_id,
+            ProblemSolutionSubmission.title.in_(
+                (
+                    MANAGED_PROBLEM_WALKTHROUGH_TITLE,
+                    *LEGACY_MANAGED_PROBLEM_WALKTHROUGH_TITLES,
+                )
+            ),
+        )
+        .order_by(
+            ProblemSolutionSubmission.sort_order.asc(),
+            ProblemSolutionSubmission.id.asc(),
+        )
+        .first()
+    )
+
+
+def sync_managed_problem_walkthrough_submission(
+    db: Session,
+    problem_id: str,
+    video_url: str,
+    embed_url: str | None,
+) -> ProblemSolutionSubmission | None:
+    submission = get_managed_problem_walkthrough_submission(db, problem_id)
+
+    if not video_url or not embed_url:
+        if submission is not None:
+            db.delete(submission)
+        return None
+
+    if submission is None:
+        submission = ProblemSolutionSubmission(
+            problem_id=problem_id,
+            title=MANAGED_PROBLEM_WALKTHROUGH_TITLE,
+            video_url=video_url,
+            embed_url=embed_url,
+            sort_order=1,
+            is_active=True,
+        )
+        db.add(submission)
+        return submission
+
+    submission_row: Any = submission
+    submission_row.video_url = video_url
+    submission_row.embed_url = embed_url
+    submission_row.title = MANAGED_PROBLEM_WALKTHROUGH_TITLE
+    submission_row.sort_order = 1
+    submission_row.is_active = True
+    return submission
+
+
+def delete_problem_and_dependencies(db: Session, problem_id: str) -> None:
+    db.query(ProblemSolutionSubmission).filter(
+        ProblemSolutionSubmission.problem_id == problem_id
+    ).delete(synchronize_session=False)
+    db.query(UserRepo).filter(UserRepo.problem_id == problem_id).delete(
+        synchronize_session=False
+    )
+    db.query(CodespaceToken).filter(CodespaceToken.problem_id == problem_id).delete(
+        synchronize_session=False
+    )
+    db.query(CompletedProblem).filter(CompletedProblem.problem_id == problem_id).delete(
+        synchronize_session=False
+    )
+    db.query(Problem).filter(Problem.id == problem_id).delete(synchronize_session=False)
 
 
 def _run_migrations():
@@ -202,6 +358,55 @@ def _run_migrations():
             """,
             "Add hide_completed column to users table",
         ),
+        (
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'problems' AND column_name = 'detail_summary'
+            """,
+            """
+            ALTER TABLE problems ADD COLUMN detail_summary TEXT
+            """,
+            "Add detail_summary column to problems table",
+        ),
+        (
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'problems' AND column_name = 'detail_overview'
+            """,
+            """
+            ALTER TABLE problems ADD COLUMN detail_overview TEXT
+            """,
+            "Add detail_overview column to problems table",
+        ),
+        (
+            """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'problems' AND column_name = 'domain_specialization'
+            """,
+            """
+            ALTER TABLE problems ADD COLUMN domain_specialization TEXT
+            """,
+            "Add domain_specialization column to problems table",
+        ),
+        (
+            """
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name = 'problem_solution_submissions'
+            """,
+            """
+            CREATE TABLE problem_solution_submissions (
+                id SERIAL PRIMARY KEY,
+                problem_id VARCHAR NOT NULL REFERENCES problems(id),
+                title VARCHAR NOT NULL,
+                video_url TEXT NOT NULL,
+                embed_url TEXT NOT NULL,
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                is_active BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            "Create problem_solution_submissions table",
+        ),
     ]
 
     with engine.connect() as conn:
@@ -221,29 +426,62 @@ def init_db():
 
 
 def _seed_initial_data():
-    """Seed the database with initial problem data if empty."""
+    """Seed the database with initial problem data and backfill detail content."""
     session_factory = get_session_local()
     db = session_factory()
     try:
-        # Check if we already have problems
-        existing = db.query(Problem).first()
-        if existing:
-            return
+        slow_api_problem = db.query(Problem).filter(Problem.id == "slow-api").first()
+        if not slow_api_problem:
+            slow_api_problem = Problem(
+                id="slow-api",
+                title="Slow API Performance",
+                description="A Spring Boot REST API for managing orders is experiencing performance issues. "
+                "Investigate and optimize the API to improve response times.",
+                detail_summary=SLOW_API_DETAIL_SUMMARY,
+                detail_overview=SLOW_API_DETAIL_OVERVIEW,
+                domain_specialization=SLOW_API_DOMAIN_SPECIALIZATION,
+                difficulty="Medium",
+                language="Java",
+                template_repo="bpalagi/slow-api-template",
+                is_active=True,
+            )
+            db.add(slow_api_problem)
+            db.flush()
+            print("[Seed] Added initial problem: slow-api")
+        else:
+            if not getattr(slow_api_problem, "detail_summary", None):
+                slow_api_problem.detail_summary = SLOW_API_DETAIL_SUMMARY
+            if not getattr(slow_api_problem, "detail_overview", None):
+                slow_api_problem.detail_overview = SLOW_API_DETAIL_OVERVIEW
+            if not getattr(slow_api_problem, "domain_specialization", None):
+                slow_api_problem.domain_specialization = SLOW_API_DOMAIN_SPECIALIZATION
 
-        # Seed the slow-api problem
-        slow_api_problem = Problem(
-            id="slow-api",
-            title="Slow API Performance",
-            description="A Spring Boot REST API for managing orders is experiencing performance issues. "
-            "Investigate and optimize the API to improve response times.",
-            difficulty="Medium",
-            language="Java",
-            template_repo="bpalagi/slow-api-template",
-            is_active=True,
+        existing_submission = (
+            db.query(ProblemSolutionSubmission)
+            .filter(
+                ProblemSolutionSubmission.problem_id == "slow-api",
+                ProblemSolutionSubmission.video_url == SLOW_API_SOLUTION_VIDEO_URL,
+            )
+            .first()
         )
-        db.add(slow_api_problem)
+        if not existing_submission:
+            db.add(
+                ProblemSolutionSubmission(
+                    problem_id="slow-api",
+                    title=SLOW_API_SOLUTION_VIDEO_TITLE,
+                    video_url=SLOW_API_SOLUTION_VIDEO_URL,
+                    embed_url=normalize_youtube_embed_url(SLOW_API_SOLUTION_VIDEO_URL),
+                    sort_order=1,
+                    is_active=True,
+                )
+            )
+            print("[Seed] Added slow-api solution submission")
+        elif not getattr(existing_submission, "embed_url", None):
+            existing_submission.embed_url = normalize_youtube_embed_url(
+                str(existing_submission.video_url)
+            )
+
         db.commit()
-        print("[Seed] Added initial problem: slow-api")
     except Exception as e:
         print(f"[Seed] Error seeding data: {e}")
         db.rollback()

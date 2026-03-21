@@ -110,7 +110,7 @@ def pytest_sessionfinish(session, exitstatus):
 
 
 @pytest.fixture
-def client():
+def client(db_session):
     """Create a test client for the FastAPI app."""
     return TestClient(app)
 
@@ -122,7 +122,19 @@ def db_session():
 
     Creates tables before yielding and cleans up after each test.
     """
-    from app.database import Base, Problem, get_engine, get_session_local
+    from app.database import (
+        SLOW_API_DETAIL_OVERVIEW,
+        SLOW_API_DETAIL_SUMMARY,
+        SLOW_API_DOMAIN_SPECIALIZATION,
+        SLOW_API_SOLUTION_VIDEO_TITLE,
+        SLOW_API_SOLUTION_VIDEO_URL,
+        Base,
+        Problem,
+        ProblemSolutionSubmission,
+        get_engine,
+        get_session_local,
+        normalize_youtube_embed_url,
+    )
 
     engine = get_engine()
     SessionLocal = get_session_local()
@@ -139,6 +151,9 @@ def db_session():
                 id="slow-api",
                 title="Slow API Performance",
                 description="A Spring Boot REST API is experiencing performance issues.",
+                detail_summary=SLOW_API_DETAIL_SUMMARY,
+                detail_overview=SLOW_API_DETAIL_OVERVIEW,
+                domain_specialization=SLOW_API_DOMAIN_SPECIALIZATION,
                 difficulty="Medium",
                 language="Java",
                 template_repo="bpalagi/slow-api-template",
@@ -156,6 +171,24 @@ def db_session():
         ]
         for p in test_problems:
             session.add(p)
+        session.commit()
+
+    slow_api_submission = (
+        session.query(ProblemSolutionSubmission)
+        .filter(ProblemSolutionSubmission.problem_id == "slow-api")
+        .first()
+    )
+    if slow_api_submission is None:
+        session.add(
+            ProblemSolutionSubmission(
+                problem_id="slow-api",
+                title=SLOW_API_SOLUTION_VIDEO_TITLE,
+                video_url=SLOW_API_SOLUTION_VIDEO_URL,
+                embed_url=normalize_youtube_embed_url(SLOW_API_SOLUTION_VIDEO_URL),
+                sort_order=1,
+                is_active=True,
+            )
+        )
         session.commit()
 
     try:

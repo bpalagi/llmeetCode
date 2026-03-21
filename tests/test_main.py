@@ -1,16 +1,27 @@
 """Tests for main application endpoints"""
 
 import asyncio
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
 from itsdangerous import BadSignature
 
+from app.database import (
+    CodespaceToken,
+    CompletedProblem,
+    Problem,
+    ProblemSolutionSubmission,
+    User,
+    UserRepo,
+)
 from app.main import (
+    build_problem_overview_paragraphs,
     create_codespace,
     delete_codespace,
     get_session_data,
+    validate_problem_authoring_form,
 )
 
 # Sample GitHub API response data for mocking codespace tests
@@ -108,6 +119,695 @@ class TestHome:
             active_codespaces["two-sum"]
             == "https://github.com/codespaces/urban-space-abc123"
         )
+
+    def test_home_contains_problem_detail_links(self, client):
+        """Catalog renders links to dedicated problem pages."""
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "/problems/slow-api" in response.text
+
+    def test_home_shows_add_problem_cta_for_logged_in_users(self, authenticated_client):
+        response = authenticated_client.get("/")
+
+        assert response.status_code == 200
+        assert "Add a Problem" in response.text
+        assert 'href="/problems/new"' in response.text
+
+    def test_home_hides_add_problem_cta_for_guests(self, client):
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert "Add a Problem" not in response.text
+
+
+class TestProblemAuthoring:
+    """Test the add-problem authoring flow."""
+
+    def test_get_add_problem_requires_authentication(self, client):
+        response = client.get("/problems/new", follow_redirects=False)
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/auth/login"
+
+    def test_get_add_problem_authenticated(self, authenticated_client):
+        response = authenticated_client.get("/problems/new")
+
+        assert response.status_code == 200
+        assert "Add a new problem" in response.text
+        assert "Template repo" in response.text
+        assert "Optional YouTube URL" in response.text
+
+    def test_post_add_problem_requires_authentication(self, client):
+        response = client.post(
+            "/problems/new", data={"problem_id": "new-problem"}, follow_redirects=False
+        )
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/auth/login"
+
+    def test_post_add_problem_success_with_video(
+        self, authenticated_client, db_session
+    ):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "latency-lab",
+                "title": "Latency Lab",
+                "description": "Investigate a latency regression in a customer-facing API.",
+                "difficulty": "Hard",
+                "language": "Go",
+                "is_active": "true",
+                "detail_summary": "Trace production latency from symptom to fix.",
+                "detail_overview": "Customers are reporting severe latency spikes.\n\nIdentify the bottleneck and restore healthy response times.",
+                "domain_specialization": "Distributed systems performance",
+                "template_repo": "acme/latency-lab-template",
+                "youtube_url": "https://www.youtube.com/watch?v=abc123xyz",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/problems/latency-lab?created=1"
+
+        problem = db_session.query(Problem).filter(Problem.id == "latency-lab").first()
+        assert problem is not None
+        assert problem.domain_specialization == "Distributed systems performance"
+
+        submission = (
+            db_session.query(ProblemSolutionSubmission)
+            .filter(ProblemSolutionSubmission.problem_id == "latency-lab")
+            .first()
+        )
+        assert submission is not None
+        assert submission.embed_url == "https://www.youtube.com/embed/abc123xyz"
+
+        detail_response = authenticated_client.get(response.headers["location"])
+        assert detail_response.status_code == 200
+        assert "Problem created successfully" in detail_response.text
+        assert "Distributed systems performance" in detail_response.text
+        assert "https://www.youtube.com/embed/abc123xyz" in detail_response.text
+
+        catalog_response = authenticated_client.get("/")
+        assert "Latency Lab" in catalog_response.text
+        assert "/problems/latency-lab" in catalog_response.text
+
+    def test_post_add_problem_success_inactive_redirects_back_to_form(
+        self, authenticated_client, db_session
+    ):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "draft-problem",
+                "title": "Draft Problem",
+                "description": "Saved without being exposed in the catalog.",
+                "difficulty": "Easy",
+                "language": "Python",
+                "is_active": "false",
+                "detail_summary": "A hidden draft summary.",
+                "detail_overview": "Draft overview content.",
+                "domain_specialization": "Authoring workflow",
+                "template_repo": "acme/draft-template",
+                "youtube_url": "",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert (
+            response.headers["location"]
+            == "/problems/new?created_problem_id=draft-problem"
+        )
+
+        follow_up = authenticated_client.get(response.headers["location"])
+        assert "draft-problem" in follow_up.text
+        assert "hidden from the catalog" in follow_up.text
+
+        catalog_response = authenticated_client.get("/")
+        problem_ids = [
+            problem["id"] for problem in catalog_response.context["problems"]
+        ]
+        assert "draft-problem" not in problem_ids
+        assert any(
+            problem["id"] == "draft-problem"
+            for problem in catalog_response.context["inactive_problems"]
+        )
+
+    def test_post_add_problem_duplicate_id(self, authenticated_client):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "slow-api",
+                "title": "Another Slow API",
+                "description": "Duplicate id should fail.",
+                "difficulty": "Medium",
+                "language": "Java",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "APIs",
+                "template_repo": "acme/duplicate-template",
+                "youtube_url": "",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "That problem id already exists." in response.text
+        assert 'value="slow-api"' in response.text
+
+    def test_post_add_problem_missing_required_fields(self, authenticated_client):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "",
+                "title": "",
+                "description": "",
+                "difficulty": "",
+                "language": "",
+                "is_active": "",
+                "detail_summary": "",
+                "detail_overview": "",
+                "domain_specialization": "",
+                "template_repo": "",
+                "youtube_url": "",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "Enter a stable problem id." in response.text
+        assert "Enter a problem title." in response.text
+        assert "Enter the GitHub template repository." in response.text
+
+    def test_post_add_problem_blank_template_repo(self, authenticated_client):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "repo-check",
+                "title": "Repo Check",
+                "description": "Template repo is required.",
+                "difficulty": "Easy",
+                "language": "Python",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "Developer tooling",
+                "template_repo": "   ",
+                "youtube_url": "",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "Enter the GitHub template repository." in response.text
+
+    def test_post_add_problem_rejects_whitespace_only_youtube(
+        self, authenticated_client
+    ):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "video-check",
+                "title": "Video Check",
+                "description": "Whitespace-only video input should fail.",
+                "difficulty": "Easy",
+                "language": "Python",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "Video validation",
+                "template_repo": "acme/video-check-template",
+                "youtube_url": "   ",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "Enter a YouTube URL or leave this blank." in response.text
+
+    def test_post_add_problem_rejects_invalid_youtube(self, authenticated_client):
+        response = authenticated_client.post(
+            "/problems/new",
+            data={
+                "problem_id": "invalid-video",
+                "title": "Invalid Video",
+                "description": "Non-YouTube URLs should fail.",
+                "difficulty": "Easy",
+                "language": "Python",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "Video validation",
+                "template_repo": "acme/invalid-video-template",
+                "youtube_url": "https://vimeo.com/12345",
+            },
+        )
+
+        assert response.status_code == 200
+        assert (
+            "Use a supported YouTube watch, live, embed, or short link."
+            in response.text
+        )
+
+    def test_validate_problem_authoring_form_trims_fields(self, db_session):
+        form_data, errors, normalized_youtube_url = validate_problem_authoring_form(
+            {
+                "problem_id": "  trim-me  ",
+                "title": "  Trim Me  ",
+                "description": "  Description  ",
+                "difficulty": "Medium",
+                "language": "  Python  ",
+                "is_active": " true ",
+                "detail_summary": "  Summary  ",
+                "detail_overview": "  Overview  ",
+                "domain_specialization": "  Testing  ",
+                "template_repo": "  acme/trim-template  ",
+                "youtube_url": " https://youtu.be/trim123 ",
+            },
+            db_session,
+        )
+
+        assert errors == {}
+        assert form_data["problem_id"] == "trim-me"
+        assert form_data["language"] == "Python"
+        assert form_data["template_repo"] == "acme/trim-template"
+        assert normalized_youtube_url == "https://www.youtube.com/embed/trim123"
+
+    def test_validate_problem_authoring_form_allows_same_id_when_editing(
+        self, db_session
+    ):
+        form_data, errors, _ = validate_problem_authoring_form(
+            {
+                "problem_id": "slow-api",
+                "title": "Slow API Performance",
+                "description": "Updated description",
+                "difficulty": "Medium",
+                "language": "Java",
+                "is_active": "true",
+                "detail_summary": "Updated summary",
+                "detail_overview": "Updated overview",
+                "domain_specialization": "API performance investigation",
+                "template_repo": "bpalagi/slow-api-template",
+                "youtube_url": "",
+            },
+            db_session,
+            current_problem_id="slow-api",
+        )
+
+        assert errors == {}
+        assert form_data["problem_id"] == "slow-api"
+
+    def test_get_edit_problem_requires_authentication(self, client):
+        response = client.get("/problems/slow-api/edit", follow_redirects=False)
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/auth/login"
+
+    def test_get_edit_problem_prefills_existing_values(self, authenticated_client):
+        response = authenticated_client.get("/problems/slow-api/edit")
+
+        assert response.status_code == 200
+        assert "Edit problem" in response.text
+        assert 'value="slow-api"' in response.text
+        assert 'readonly aria-readonly="true"' in response.text
+        assert "This slug is locked after creation" in response.text
+
+    def test_get_edit_problem_supports_inactive_problem(
+        self, authenticated_client, db_session
+    ):
+        db_session.add(
+            Problem(
+                id="inactive-lab",
+                title="Inactive Lab",
+                description="An inactive problem.",
+                detail_summary="Inactive summary",
+                detail_overview="Inactive overview",
+                domain_specialization="Maintenance",
+                difficulty="Easy",
+                language="Python",
+                template_repo="test/inactive-lab-template",
+                is_active=False,
+            )
+        )
+        db_session.commit()
+
+        response = authenticated_client.get("/problems/inactive-lab/edit")
+
+        assert response.status_code == 200
+        assert "Inactive Lab" in response.text
+        assert 'value="inactive-lab"' in response.text
+
+    def test_post_edit_problem_updates_problem_and_walkthrough(
+        self, authenticated_client, db_session
+    ):
+        response = authenticated_client.post(
+            "/problems/slow-api/edit",
+            data={
+                "problem_id": "attempted-slug-change",
+                "title": "Slow API Rescue",
+                "description": "Updated short description.",
+                "difficulty": "Hard",
+                "language": "Go",
+                "is_active": "true",
+                "detail_summary": "Updated summary",
+                "detail_overview": "Updated overview",
+                "domain_specialization": "Incident response",
+                "template_repo": "acme/slow-api-rescue-template",
+                "youtube_url": "https://youtu.be/rescue123",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert response.headers["location"] == "/problems/slow-api?updated=1"
+
+        problem = db_session.query(Problem).filter(Problem.id == "slow-api").one()
+        assert problem.title == "Slow API Rescue"
+        assert problem.language == "Go"
+        assert problem.template_repo == "acme/slow-api-rescue-template"
+        assert (
+            db_session.query(Problem)
+            .filter(Problem.id == "attempted-slug-change")
+            .first()
+            is None
+        )
+
+        walkthrough = (
+            db_session.query(ProblemSolutionSubmission)
+            .filter(ProblemSolutionSubmission.problem_id == "slow-api")
+            .filter(ProblemSolutionSubmission.title == "Problem walkthrough")
+            .one()
+        )
+        assert walkthrough.video_url == "https://youtu.be/rescue123"
+        assert walkthrough.embed_url == "https://www.youtube.com/embed/rescue123"
+
+        detail_response = authenticated_client.get(response.headers["location"])
+        assert detail_response.status_code == 200
+        assert "Problem updated successfully" in detail_response.text
+        assert "Slow API Rescue" in detail_response.text
+
+        catalog_response = authenticated_client.get("/")
+        assert "Slow API Rescue" in catalog_response.text
+
+    def test_post_edit_problem_invalid_submission_preserves_values(
+        self, authenticated_client
+    ):
+        response = authenticated_client.post(
+            "/problems/slow-api/edit",
+            data={
+                "problem_id": "slow-api",
+                "title": "",
+                "description": "Still here",
+                "difficulty": "Medium",
+                "language": "Python",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "Testing",
+                "template_repo": "bad-format",
+                "youtube_url": "https://vimeo.com/12345",
+            },
+        )
+
+        assert response.status_code == 200
+        assert "Enter a problem title." in response.text
+        assert "Use the GitHub owner/repository format." in response.text
+        assert (
+            "Use a supported YouTube watch, live, embed, or short link."
+            in response.text
+        )
+        assert 'value="slow-api"' in response.text
+        assert 'readonly aria-readonly="true"' in response.text
+        assert "Still here" in response.text
+
+    def test_post_edit_problem_can_save_inactive(
+        self, authenticated_client, db_session
+    ):
+        response = authenticated_client.post(
+            "/problems/slow-api/edit",
+            data={
+                "problem_id": "slow-api",
+                "title": "Slow API Performance",
+                "description": "Temporarily hidden.",
+                "difficulty": "Medium",
+                "language": "Java",
+                "is_active": "false",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "API performance investigation",
+                "template_repo": "bpalagi/slow-api-template",
+                "youtube_url": "",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        assert (
+            response.headers["location"] == "/problems/slow-api/edit?saved_inactive=1"
+        )
+
+        edit_response = authenticated_client.get(response.headers["location"])
+        assert edit_response.status_code == 200
+        assert "remains hidden from the catalog" in edit_response.text
+
+        catalog_response = authenticated_client.get("/")
+        problem_ids = [
+            problem["id"] for problem in catalog_response.context["problems"]
+        ]
+        assert "slow-api" not in problem_ids
+        assert any(
+            problem["id"] == "slow-api"
+            for problem in catalog_response.context["inactive_problems"]
+        )
+
+        detail_response = authenticated_client.get("/problems/slow-api")
+        assert detail_response.status_code == 404
+
+        problem = db_session.query(Problem).filter(Problem.id == "slow-api").one()
+        assert problem.is_active is False
+
+    def test_post_edit_problem_clears_managed_walkthrough(
+        self, authenticated_client, db_session
+    ):
+        response = authenticated_client.post(
+            "/problems/slow-api/edit",
+            data={
+                "problem_id": "slow-api",
+                "title": "Slow API Performance",
+                "description": "No walkthrough now.",
+                "difficulty": "Medium",
+                "language": "Java",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "API performance investigation",
+                "template_repo": "bpalagi/slow-api-template",
+                "youtube_url": "",
+            },
+            follow_redirects=False,
+        )
+
+        assert response.status_code == 303
+        walkthrough = (
+            db_session.query(ProblemSolutionSubmission)
+            .filter(ProblemSolutionSubmission.problem_id == "slow-api")
+            .filter(ProblemSolutionSubmission.title == "Problem walkthrough")
+            .first()
+        )
+        assert walkthrough is None
+
+    def test_problem_delete_confirmation_requires_authentication(self, client):
+        response = client.get("/problems/slow-api/delete", follow_redirects=False)
+
+        assert response.status_code == 302
+        assert response.headers["location"] == "/auth/login"
+
+    def test_problem_delete_confirmation_page(self, authenticated_client):
+        response = authenticated_client.get("/problems/slow-api/delete")
+
+        assert response.status_code == 200
+        assert "Delete Slow API Performance?" in response.text
+        assert "GitHub repositories and Codespaces are not cleaned up" in response.text
+        assert 'action="/problems/slow-api/delete"' in response.text
+        assert 'href="/problems/slow-api"' in response.text
+
+    def test_inactive_problem_delete_confirmation_returns_to_edit(
+        self, authenticated_client, db_session
+    ):
+        problem = db_session.query(Problem).filter(Problem.id == "slow-api").one()
+        problem.is_active = False
+        db_session.commit()
+
+        response = authenticated_client.get("/problems/slow-api/delete")
+
+        assert response.status_code == 200
+        assert 'href="/problems/slow-api/edit"' in response.text
+        assert 'href="/problems/slow-api"' not in response.text
+        assert "Back to edit" in response.text
+
+    def test_problem_delete_removes_dependent_rows(
+        self, authenticated_client, db_session
+    ):
+        response = authenticated_client.post("/problems/slow-api/complete")
+        assert response.status_code == 200
+
+        user = db_session.query(User).filter(User.id == 1).first()
+        assert user is not None
+
+        db_session.add(
+            UserRepo(
+                user_id=user.id,
+                github_username="testuser",
+                repo_name="llmeetcode-slow-api-test",
+                codespace_name="slow-api-space",
+                problem_id="slow-api",
+                template_repo="bpalagi/slow-api-template",
+            )
+        )
+        db_session.add(
+            CodespaceToken(
+                token="delete-problem-token",
+                user_id=user.id,
+                problem_id="slow-api",
+                codespace_name="slow-api-space",
+                expires_at=datetime.now(UTC),
+            )
+        )
+        db_session.commit()
+
+        delete_response = authenticated_client.post(
+            "/problems/slow-api/delete", follow_redirects=False
+        )
+
+        assert delete_response.status_code == 303
+        assert delete_response.headers["location"] == "/?deleted_problem_id=slow-api"
+
+        assert (
+            db_session.query(Problem).filter(Problem.id == "slow-api").first() is None
+        )
+        assert (
+            db_session.query(ProblemSolutionSubmission)
+            .filter(ProblemSolutionSubmission.problem_id == "slow-api")
+            .count()
+            == 0
+        )
+        assert (
+            db_session.query(UserRepo).filter(UserRepo.problem_id == "slow-api").count()
+            == 0
+        )
+        assert (
+            db_session.query(CodespaceToken)
+            .filter(CodespaceToken.problem_id == "slow-api")
+            .count()
+            == 0
+        )
+        assert (
+            db_session.query(CompletedProblem)
+            .filter(CompletedProblem.problem_id == "slow-api")
+            .count()
+            == 0
+        )
+
+        home_response = authenticated_client.get(delete_response.headers["location"])
+        assert home_response.status_code == 200
+        assert "was deleted permanently" in home_response.text
+
+        detail_response = authenticated_client.get("/problems/slow-api")
+        assert detail_response.status_code == 404
+
+        dashboard_response = authenticated_client.get("/dashboard")
+        assert dashboard_response.status_code == 200
+
+
+class TestProblemDetailPage:
+    """Test dedicated problem detail page rendering and state."""
+
+    def test_problem_detail_success(self, client):
+        response = client.get("/problems/slow-api")
+
+        assert response.status_code == 200
+        assert "Slow API Performance" in response.text
+        assert "Recent Orders dashboard" in response.text
+        assert "https://www.youtube.com/embed/dtjqMNyNPiw" in response.text
+
+    def test_problem_detail_unknown_problem(self, client):
+        response = client.get("/problems/does-not-exist")
+
+        assert response.status_code == 404
+
+    @patch("app.main.list_user_codespaces")
+    def test_problem_detail_authenticated_context(
+        self, mock_list_codespaces, authenticated_client
+    ):
+        mock_list_codespaces.return_value = [
+            {
+                "name": "slow-api-codespace",
+                "display_name": "llmeetcode-slow-api-abc123",
+                "state": "Available",
+                "web_url": "https://github.com/codespaces/slow-api-codespace",
+                "created_at": "2024-01-01T10:00:00Z",
+                "last_used_at": "2024-01-02T15:00:00Z",
+                "problem_id": "slow-api",
+            },
+        ]
+
+        authenticated_client.post("/problems/slow-api/complete")
+        response = authenticated_client.get("/problems/slow-api")
+
+        assert response.status_code == 200
+        assert response.context["logged_in"] is True
+        assert response.context["is_completed"] is True
+        assert (
+            response.context["active_codespace_url"]
+            == "https://github.com/codespaces/slow-api-codespace"
+        )
+        assert "Resume Codespace" in response.text
+        assert "Completed" in response.text
+
+    def test_problem_detail_fallback_content(self, client, db_session):
+        from app.database import Problem
+
+        db_session.add(
+            Problem(
+                id="plain-problem",
+                title="Plain Problem",
+                description="Short catalog copy only.",
+                difficulty="Easy",
+                language="Python",
+                template_repo="test/plain-problem-template",
+                is_active=True,
+            )
+        )
+        db_session.commit()
+
+        response = client.get("/problems/plain-problem")
+
+        assert response.status_code == 200
+        assert response.context["detail_summary"] == "Short catalog copy only."
+        assert response.context["overview_paragraphs"] == ["Short catalog copy only."]
+        assert "No solution videos yet" in response.text
+
+    def test_problem_detail_shows_management_controls_for_logged_in_users(
+        self, authenticated_client
+    ):
+        response = authenticated_client.get("/problems/slow-api")
+
+        assert response.status_code == 200
+        assert 'href="/problems/slow-api/edit"' in response.text
+        assert 'href="/problems/slow-api/delete"' in response.text
+
+    def test_problem_detail_hides_management_controls_for_guests(self, client):
+        response = client.get("/problems/slow-api")
+
+        assert response.status_code == 200
+        assert 'href="/problems/slow-api/edit"' not in response.text
+        assert 'href="/problems/slow-api/delete"' not in response.text
+
+    def test_build_problem_overview_paragraphs(self, db_session):
+        from app.database import Problem
+
+        problem = db_session.query(Problem).filter(Problem.id == "slow-api").first()
+
+        paragraphs = build_problem_overview_paragraphs(problem)
+        assert len(paragraphs) >= 2
+        assert paragraphs[0].startswith("Multiple enterprise customers")
 
 
 class TestAuth:

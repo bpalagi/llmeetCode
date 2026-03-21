@@ -122,6 +122,7 @@ SLOW_API_DETAIL_OVERVIEW = (
 )
 
 SLOW_API_DOMAIN_SPECIALIZATION = "API performance investigation"
+MAINTAINER_LOGIN = "bpalagi"
 
 MANAGED_PROBLEM_WALKTHROUGH_TITLE = "Problem walkthrough"
 LEGACY_MANAGED_PROBLEM_WALKTHROUGH_TITLES = ("Slow API walkthrough",)
@@ -165,6 +166,11 @@ class User(Base):
 
     completed_problems = relationship("CompletedProblem", back_populates="user")
     user_repos = relationship("UserRepo", back_populates="user")
+    created_problems = relationship(
+        "Problem",
+        back_populates="creator",
+        foreign_keys="Problem.creator_user_id",
+    )
 
 
 class CompletedProblem(Base):
@@ -209,6 +215,7 @@ class Problem(Base):
     detail_summary = Column(Text, nullable=True)
     detail_overview = Column(Text, nullable=True)
     domain_specialization = Column(Text, nullable=True)
+    creator_user_id = Column(Integer, ForeignKey("users.id"), index=True, nullable=True)
     difficulty = Column(String, nullable=False)  # Easy, Medium, Hard
     language = Column(String, nullable=False)  # Java, Python, etc.
     template_repo = Column(String, nullable=False)  # e.g., "bpalagi/slow-api-template"
@@ -225,6 +232,11 @@ class Problem(Base):
             ProblemSolutionSubmission.sort_order.asc(),
             ProblemSolutionSubmission.id.asc(),
         ),
+    )
+    creator = relationship(
+        "User",
+        back_populates="created_problems",
+        foreign_keys=[creator_user_id],
     )
 
 
@@ -335,6 +347,17 @@ def delete_problem_and_dependencies(db: Session, problem_id: str) -> None:
     db.query(Problem).filter(Problem.id == problem_id).delete(synchronize_session=False)
 
 
+def _backfill_problem_ownership(db: Session) -> None:
+    maintainer = db.query(User).filter(User.login == MAINTAINER_LOGIN).first()
+    if maintainer is None:
+        return
+
+    db.query(Problem).filter(Problem.creator_user_id.is_(None)).update(
+        {Problem.creator_user_id: maintainer.id},
+        synchronize_session=False,
+    )
+
+
 def _run_migrations():
     """Run any pending schema migrations.
 
@@ -390,6 +413,17 @@ def _run_migrations():
         ),
         (
             """
+            SELECT column_name FROM information_schema.columns
+            WHERE table_name = 'problems' AND column_name = 'creator_user_id'
+            """,
+            """
+            ALTER TABLE problems
+            ADD COLUMN creator_user_id INTEGER REFERENCES users(id)
+            """,
+            "Add creator_user_id column to problems table",
+        ),
+        (
+            """
             SELECT table_name FROM information_schema.tables
             WHERE table_name = 'problem_solution_submissions'
             """,
@@ -437,24 +471,28 @@ def _seed_initial_data():
                 title="Slow API Performance",
                 description="A Spring Boot REST API for managing orders is experiencing performance issues. "
                 "Investigate and optimize the API to improve response times.",
-                detail_summary=SLOW_API_DETAIL_SUMMARY,
-                detail_overview=SLOW_API_DETAIL_OVERVIEW,
-                domain_specialization=SLOW_API_DOMAIN_SPECIALIZATION,
                 difficulty="Medium",
                 language="Java",
                 template_repo="bpalagi/slow-api-template",
                 is_active=True,
             )
+            slow_api_problem_row: Any = slow_api_problem
+            slow_api_problem_row.detail_summary = SLOW_API_DETAIL_SUMMARY
+            slow_api_problem_row.detail_overview = SLOW_API_DETAIL_OVERVIEW
+            slow_api_problem_row.domain_specialization = SLOW_API_DOMAIN_SPECIALIZATION
             db.add(slow_api_problem)
             db.flush()
             print("[Seed] Added initial problem: slow-api")
         else:
+            slow_api_problem_row: Any = slow_api_problem
             if not getattr(slow_api_problem, "detail_summary", None):
-                slow_api_problem.detail_summary = SLOW_API_DETAIL_SUMMARY
+                slow_api_problem_row.detail_summary = SLOW_API_DETAIL_SUMMARY
             if not getattr(slow_api_problem, "detail_overview", None):
-                slow_api_problem.detail_overview = SLOW_API_DETAIL_OVERVIEW
+                slow_api_problem_row.detail_overview = SLOW_API_DETAIL_OVERVIEW
             if not getattr(slow_api_problem, "domain_specialization", None):
-                slow_api_problem.domain_specialization = SLOW_API_DOMAIN_SPECIALIZATION
+                slow_api_problem_row.domain_specialization = (
+                    SLOW_API_DOMAIN_SPECIALIZATION
+                )
 
         existing_submission = (
             db.query(ProblemSolutionSubmission)
@@ -465,22 +503,26 @@ def _seed_initial_data():
             .first()
         )
         if not existing_submission:
-            db.add(
-                ProblemSolutionSubmission(
-                    problem_id="slow-api",
-                    title=SLOW_API_SOLUTION_VIDEO_TITLE,
-                    video_url=SLOW_API_SOLUTION_VIDEO_URL,
-                    embed_url=normalize_youtube_embed_url(SLOW_API_SOLUTION_VIDEO_URL),
-                    sort_order=1,
-                    is_active=True,
-                )
+            submission = ProblemSolutionSubmission(
+                problem_id="slow-api",
+                title=SLOW_API_SOLUTION_VIDEO_TITLE,
+                video_url=SLOW_API_SOLUTION_VIDEO_URL,
+                sort_order=1,
+                is_active=True,
             )
+            submission_row: Any = submission
+            submission_row.embed_url = normalize_youtube_embed_url(
+                SLOW_API_SOLUTION_VIDEO_URL
+            )
+            db.add(submission)
             print("[Seed] Added slow-api solution submission")
         elif not getattr(existing_submission, "embed_url", None):
-            existing_submission.embed_url = normalize_youtube_embed_url(
+            existing_submission_row: Any = existing_submission
+            existing_submission_row.embed_url = normalize_youtube_embed_url(
                 str(existing_submission.video_url)
             )
 
+        _backfill_problem_ownership(db)
         db.commit()
     except Exception as e:
         print(f"[Seed] Error seeding data: {e}")

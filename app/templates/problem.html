@@ -69,6 +69,7 @@
                                 <i class="fas {% if is_completed %}fa-check-circle{% else %}fa-circle{% endif %}"></i>
                                 {% if is_completed %}Completed{% else %}Mark Complete{% endif %}
                             </button>
+                            {% if can_manage_problem %}
                             <div class="mt-2 border-t border-gray-200 pt-3 dark:border-gray-700">
                                 <p class="mb-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-gray-500 dark:text-gray-400">Manage problem</p>
                                 <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-1">
@@ -82,6 +83,7 @@
                                     </a>
                                 </div>
                             </div>
+                            {% endif %}
                             {% endif %}
                         </div>
                     </div>

@@ -207,7 +207,7 @@ def authenticated_client(db_session):
 
     Depends on db_session to ensure tables are created.
     """
-    from app.database import User
+    from app.database import Problem, User
     from app.main import serializer
 
     # Check if user already exists
@@ -225,6 +225,12 @@ def authenticated_client(db_session):
 
     user_id = user.id
 
+    db_session.query(Problem).filter(Problem.creator_user_id.is_(None)).update(
+        {Problem.creator_user_id: user_id},
+        synchronize_session=False,
+    )
+    db_session.commit()
+
     test_client = TestClient(app)
     session_token = serializer.dumps(
         {
@@ -235,3 +241,76 @@ def authenticated_client(db_session):
     )
     test_client.cookies.set("session", str(session_token))
     return test_client
+
+
+def _build_authenticated_client(
+    db_session,
+    *,
+    github_id: int,
+    login: str,
+    name: str,
+):
+    from app.database import Problem, User
+    from app.main import serializer
+
+    user = db_session.query(User).filter(User.github_id == github_id).first()
+    if not user:
+        user = User(
+            github_id=github_id,
+            login=login,
+            name=name,
+            avatar_url="https://example.com/avatar.jpg",
+        )
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+
+    user_id = user.id
+
+    if login == "testuser":
+        db_session.query(Problem).filter(Problem.creator_user_id.is_(None)).update(
+            {Problem.creator_user_id: user_id},
+            synchronize_session=False,
+        )
+        db_session.commit()
+
+    test_client = TestClient(app)
+    session_token = serializer.dumps(
+        {
+            "access_token": "test_token",
+            "user_id": user_id,
+            "user": {"id": user_id, "login": login, "name": name},
+        }
+    )
+    test_client.cookies.set("session", str(session_token))
+    return test_client
+
+
+@pytest.fixture
+def owner_client(db_session):
+    return _build_authenticated_client(
+        db_session,
+        github_id=12345,
+        login="testuser",
+        name="Test User",
+    )
+
+
+@pytest.fixture
+def other_authenticated_client(db_session):
+    return _build_authenticated_client(
+        db_session,
+        github_id=54321,
+        login="otheruser",
+        name="Other User",
+    )
+
+
+@pytest.fixture
+def bpalagi_client(db_session):
+    return _build_authenticated_client(
+        db_session,
+        github_id=99999,
+        login="bpalagi",
+        name="B Palagi",
+    )

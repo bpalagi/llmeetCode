@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session, selectinload
 
 from .database import (
+    MAINTAINER_LOGIN,
     CodespaceToken,
     CompletedProblem,
     Problem,
@@ -315,6 +316,29 @@ def get_problem_for_management(db: Session, problem_id: str) -> Problem | None:
     )
 
 
+def get_authenticated_user(session: dict[str, Any], db: Session) -> User | None:
+    user_id = session.get("user_id")
+    if user_id is None:
+        return None
+
+    return db.query(User).filter(User.id == user_id).first()
+
+
+def can_manage_problem(user: User | None, problem: Problem) -> bool:
+    if user is None:
+        return False
+
+    if str(getattr(user, "login", "")) == MAINTAINER_LOGIN:
+        return True
+
+    return getattr(user, "id", None) == getattr(problem, "creator_user_id", None)
+
+
+def require_problem_management_access(user: User | None, problem: Problem) -> None:
+    if not can_manage_problem(user, problem):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 def build_problem_authoring_form_data_from_db(
     db: Session, problem: Problem
 ) -> dict[str, str]:
@@ -336,12 +360,21 @@ async def build_problem_page_context(
     context: dict[str, Any] = {
         "is_completed": False,
         "active_codespace_url": None,
+        "can_manage_problem": False,
         "logged_in": bool(session),
         "user": session.get("user"),
     }
 
     if not session or "user_id" not in session:
         return context
+
+    current_user = get_authenticated_user(session, db)
+    if current_user is None:
+        return context
+
+    problem = db.query(Problem).filter(Problem.id == problem_id).first()
+    if problem is not None:
+        context["can_manage_problem"] = can_manage_problem(current_user, problem)
 
     context["is_completed"] = (
         db.query(CompletedProblem)
@@ -751,7 +784,7 @@ async def home(
     completed_ids: set[str] = set()
     active_codespaces: dict[str, str] = {}  # Maps problem_id -> codespace web_url
     if session and "user_id" in session:
-        user = db.query(User).filter(User.id == session["user_id"]).first()
+        user = get_authenticated_user(session, db)
         if user is not None:
             hide_completed_bool = bool(getattr(user, "hide_completed", False))
 
@@ -802,6 +835,7 @@ async def home(
 
     inactive_problems: list[dict[str, str]] = []
     if session and "user_id" in session:
+        current_user = get_authenticated_user(session, db)
         inactive_problems = [
             {
                 "id": cast(str, p.id),
@@ -813,6 +847,7 @@ async def home(
             .filter(Problem.is_active.is_(False))
             .order_by(Problem.updated_at.desc(), Problem.created_at.desc())
             .all()
+            if can_manage_problem(current_user, p)
         ]
 
     # Hide completed problems if requested
@@ -884,9 +919,11 @@ async def edit_problem_page(
     if not session or "user_id" not in session:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    current_user = get_authenticated_user(session, db)
     problem = get_problem_for_management(db, problem_id)
     if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
+    require_problem_management_access(current_user, problem)
 
     success_message = None
     if saved_inactive:
@@ -936,6 +973,7 @@ async def create_problem(
         detail_summary=form_data["detail_summary"],
         detail_overview=form_data["detail_overview"],
         domain_specialization=form_data["domain_specialization"],
+        creator_user_id=session["user_id"],
         difficulty=form_data["difficulty"],
         language=form_data["language"],
         template_repo=form_data["template_repo"],
@@ -975,9 +1013,11 @@ async def update_problem(
     if not session or "user_id" not in session:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    current_user = get_authenticated_user(session, db)
     problem = get_problem_for_management(db, problem_id)
     if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
+    require_problem_management_access(current_user, problem)
 
     submitted_form = dict(await request.form())
     submitted_form["problem_id"] = problem_id
@@ -1037,9 +1077,11 @@ async def delete_problem_confirmation_page(
     if not session or "user_id" not in session:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    current_user = get_authenticated_user(session, db)
     problem = get_problem_for_management(db, problem_id)
     if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
+    require_problem_management_access(current_user, problem)
 
     return templates.TemplateResponse(
         "delete-problem.html",
@@ -1068,9 +1110,11 @@ async def delete_problem(
     if not session or "user_id" not in session:
         return RedirectResponse(url="/auth/login", status_code=302)
 
+    current_user = get_authenticated_user(session, db)
     problem = get_problem_for_management(db, problem_id)
     if problem is None:
         raise HTTPException(status_code=404, detail="Problem not found")
+    require_problem_management_access(current_user, problem)
 
     delete_problem_and_dependencies(db, problem_id)
     db.commit()

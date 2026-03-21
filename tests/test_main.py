@@ -140,6 +140,39 @@ class TestHome:
         assert response.status_code == 200
         assert "Add a Problem" not in response.text
 
+    def test_home_shows_inactive_problem_management_only_for_authorized_users(
+        self, owner_client, other_authenticated_client, bpalagi_client, db_session
+    ):
+        owner = db_session.query(User).filter(User.login == "testuser").one()
+        db_session.add(
+            Problem(
+                id="hidden-owner-problem",
+                title="Hidden Owner Problem",
+                description="Owner-only inactive problem.",
+                detail_summary="Summary",
+                detail_overview="Overview",
+                domain_specialization="Ownership",
+                difficulty="Easy",
+                language="Python",
+                template_repo="test/hidden-owner-problem-template",
+                creator_user_id=owner.id,
+                is_active=False,
+            )
+        )
+        db_session.commit()
+
+        owner_response = owner_client.get("/")
+        assert owner_response.status_code == 200
+        assert "Hidden Owner Problem" in owner_response.text
+
+        other_response = other_authenticated_client.get("/")
+        assert other_response.status_code == 200
+        assert "Hidden Owner Problem" not in other_response.text
+
+        bpalagi_response = bpalagi_client.get("/")
+        assert bpalagi_response.status_code == 200
+        assert "Hidden Owner Problem" in bpalagi_response.text
+
 
 class TestProblemAuthoring:
     """Test the add-problem authoring flow."""
@@ -193,6 +226,7 @@ class TestProblemAuthoring:
         problem = db_session.query(Problem).filter(Problem.id == "latency-lab").first()
         assert problem is not None
         assert problem.domain_specialization == "Distributed systems performance"
+        assert problem.creator_user_id == 1
 
         submission = (
             db_session.query(ProblemSolutionSubmission)
@@ -252,6 +286,9 @@ class TestProblemAuthoring:
             problem["id"] == "draft-problem"
             for problem in catalog_response.context["inactive_problems"]
         )
+
+        problem = db_session.query(Problem).filter(Problem.id == "draft-problem").one()
+        assert problem.creator_user_id == 1
 
     def test_post_add_problem_duplicate_id(self, authenticated_client):
         response = authenticated_client.post(
@@ -420,8 +457,8 @@ class TestProblemAuthoring:
         assert response.status_code == 302
         assert response.headers["location"] == "/auth/login"
 
-    def test_get_edit_problem_prefills_existing_values(self, authenticated_client):
-        response = authenticated_client.get("/problems/slow-api/edit")
+    def test_get_edit_problem_prefills_existing_values(self, owner_client):
+        response = owner_client.get("/problems/slow-api/edit")
 
         assert response.status_code == 200
         assert "Edit problem" in response.text
@@ -429,9 +466,8 @@ class TestProblemAuthoring:
         assert 'readonly aria-readonly="true"' in response.text
         assert "This slug is locked after creation" in response.text
 
-    def test_get_edit_problem_supports_inactive_problem(
-        self, authenticated_client, db_session
-    ):
+    def test_get_edit_problem_supports_inactive_problem(self, owner_client, db_session):
+        owner = db_session.query(User).filter(User.login == "testuser").one()
         db_session.add(
             Problem(
                 id="inactive-lab",
@@ -443,21 +479,22 @@ class TestProblemAuthoring:
                 difficulty="Easy",
                 language="Python",
                 template_repo="test/inactive-lab-template",
+                creator_user_id=owner.id,
                 is_active=False,
             )
         )
         db_session.commit()
 
-        response = authenticated_client.get("/problems/inactive-lab/edit")
+        response = owner_client.get("/problems/inactive-lab/edit")
 
         assert response.status_code == 200
         assert "Inactive Lab" in response.text
         assert 'value="inactive-lab"' in response.text
 
     def test_post_edit_problem_updates_problem_and_walkthrough(
-        self, authenticated_client, db_session
+        self, owner_client, db_session
     ):
-        response = authenticated_client.post(
+        response = owner_client.post(
             "/problems/slow-api/edit",
             data={
                 "problem_id": "attempted-slug-change",
@@ -498,18 +535,16 @@ class TestProblemAuthoring:
         assert walkthrough.video_url == "https://youtu.be/rescue123"
         assert walkthrough.embed_url == "https://www.youtube.com/embed/rescue123"
 
-        detail_response = authenticated_client.get(response.headers["location"])
+        detail_response = owner_client.get(response.headers["location"])
         assert detail_response.status_code == 200
         assert "Problem updated successfully" in detail_response.text
         assert "Slow API Rescue" in detail_response.text
 
-        catalog_response = authenticated_client.get("/")
+        catalog_response = owner_client.get("/")
         assert "Slow API Rescue" in catalog_response.text
 
-    def test_post_edit_problem_invalid_submission_preserves_values(
-        self, authenticated_client
-    ):
-        response = authenticated_client.post(
+    def test_post_edit_problem_invalid_submission_preserves_values(self, owner_client):
+        response = owner_client.post(
             "/problems/slow-api/edit",
             data={
                 "problem_id": "slow-api",
@@ -537,10 +572,8 @@ class TestProblemAuthoring:
         assert 'readonly aria-readonly="true"' in response.text
         assert "Still here" in response.text
 
-    def test_post_edit_problem_can_save_inactive(
-        self, authenticated_client, db_session
-    ):
-        response = authenticated_client.post(
+    def test_post_edit_problem_can_save_inactive(self, owner_client, db_session):
+        response = owner_client.post(
             "/problems/slow-api/edit",
             data={
                 "problem_id": "slow-api",
@@ -563,11 +596,11 @@ class TestProblemAuthoring:
             response.headers["location"] == "/problems/slow-api/edit?saved_inactive=1"
         )
 
-        edit_response = authenticated_client.get(response.headers["location"])
+        edit_response = owner_client.get(response.headers["location"])
         assert edit_response.status_code == 200
         assert "remains hidden from the catalog" in edit_response.text
 
-        catalog_response = authenticated_client.get("/")
+        catalog_response = owner_client.get("/")
         problem_ids = [
             problem["id"] for problem in catalog_response.context["problems"]
         ]
@@ -577,16 +610,16 @@ class TestProblemAuthoring:
             for problem in catalog_response.context["inactive_problems"]
         )
 
-        detail_response = authenticated_client.get("/problems/slow-api")
+        detail_response = owner_client.get("/problems/slow-api")
         assert detail_response.status_code == 404
 
         problem = db_session.query(Problem).filter(Problem.id == "slow-api").one()
         assert problem.is_active is False
 
     def test_post_edit_problem_clears_managed_walkthrough(
-        self, authenticated_client, db_session
+        self, owner_client, db_session
     ):
-        response = authenticated_client.post(
+        response = owner_client.post(
             "/problems/slow-api/edit",
             data={
                 "problem_id": "slow-api",
@@ -619,8 +652,8 @@ class TestProblemAuthoring:
         assert response.status_code == 302
         assert response.headers["location"] == "/auth/login"
 
-    def test_problem_delete_confirmation_page(self, authenticated_client):
-        response = authenticated_client.get("/problems/slow-api/delete")
+    def test_problem_delete_confirmation_page(self, owner_client):
+        response = owner_client.get("/problems/slow-api/delete")
 
         assert response.status_code == 200
         assert "Delete Slow API Performance?" in response.text
@@ -629,26 +662,24 @@ class TestProblemAuthoring:
         assert 'href="/problems/slow-api"' in response.text
 
     def test_inactive_problem_delete_confirmation_returns_to_edit(
-        self, authenticated_client, db_session
+        self, owner_client, db_session
     ):
         problem = db_session.query(Problem).filter(Problem.id == "slow-api").one()
         problem.is_active = False
         db_session.commit()
 
-        response = authenticated_client.get("/problems/slow-api/delete")
+        response = owner_client.get("/problems/slow-api/delete")
 
         assert response.status_code == 200
         assert 'href="/problems/slow-api/edit"' in response.text
         assert 'href="/problems/slow-api"' not in response.text
         assert "Back to edit" in response.text
 
-    def test_problem_delete_removes_dependent_rows(
-        self, authenticated_client, db_session
-    ):
-        response = authenticated_client.post("/problems/slow-api/complete")
+    def test_problem_delete_removes_dependent_rows(self, owner_client, db_session):
+        response = owner_client.post("/problems/slow-api/complete")
         assert response.status_code == 200
 
-        user = db_session.query(User).filter(User.id == 1).first()
+        user = db_session.query(User).filter(User.login == "testuser").first()
         assert user is not None
 
         db_session.add(
@@ -672,7 +703,7 @@ class TestProblemAuthoring:
         )
         db_session.commit()
 
-        delete_response = authenticated_client.post(
+        delete_response = owner_client.post(
             "/problems/slow-api/delete", follow_redirects=False
         )
 
@@ -705,15 +736,65 @@ class TestProblemAuthoring:
             == 0
         )
 
-        home_response = authenticated_client.get(delete_response.headers["location"])
+        home_response = owner_client.get(delete_response.headers["location"])
         assert home_response.status_code == 200
         assert "was deleted permanently" in home_response.text
 
-        detail_response = authenticated_client.get("/problems/slow-api")
+        detail_response = owner_client.get("/problems/slow-api")
         assert detail_response.status_code == 404
 
-        dashboard_response = authenticated_client.get("/dashboard")
+        dashboard_response = owner_client.get("/dashboard")
         assert dashboard_response.status_code == 200
+
+    def test_edit_problem_forbidden_for_non_owner(
+        self, owner_client, other_authenticated_client, db_session
+    ):
+        response = other_authenticated_client.get("/problems/slow-api/edit")
+
+        assert response.status_code == 403
+
+        update_response = other_authenticated_client.post(
+            "/problems/slow-api/edit",
+            data={
+                "problem_id": "slow-api",
+                "title": "Unauthorized Update",
+                "description": "Should fail.",
+                "difficulty": "Medium",
+                "language": "Java",
+                "is_active": "true",
+                "detail_summary": "Summary",
+                "detail_overview": "Overview",
+                "domain_specialization": "Security",
+                "template_repo": "bpalagi/slow-api-template",
+                "youtube_url": "",
+            },
+        )
+        assert update_response.status_code == 403
+
+        problem = db_session.query(Problem).filter(Problem.id == "slow-api").one()
+        assert problem.title != "Unauthorized Update"
+
+    def test_delete_problem_forbidden_for_non_owner(
+        self, other_authenticated_client, db_session
+    ):
+        response = other_authenticated_client.get("/problems/slow-api/delete")
+        assert response.status_code == 403
+
+        delete_response = other_authenticated_client.post("/problems/slow-api/delete")
+        assert delete_response.status_code == 403
+        assert (
+            db_session.query(Problem).filter(Problem.id == "slow-api").first()
+            is not None
+        )
+
+    def test_bpalagi_can_manage_problem_created_by_another_user(
+        self, bpalagi_client, db_session
+    ):
+        response = bpalagi_client.get("/problems/slow-api/edit")
+        assert response.status_code == 200
+
+        delete_response = bpalagi_client.get("/problems/slow-api/delete")
+        assert delete_response.status_code == 200
 
 
 class TestProblemDetailPage:
@@ -784,14 +865,28 @@ class TestProblemDetailPage:
         assert response.context["overview_paragraphs"] == ["Short catalog copy only."]
         assert "No solution videos yet" in response.text
 
-    def test_problem_detail_shows_management_controls_for_logged_in_users(
-        self, authenticated_client
-    ):
-        response = authenticated_client.get("/problems/slow-api")
+    def test_problem_detail_shows_management_controls_for_owner(self, owner_client):
+        response = owner_client.get("/problems/slow-api")
 
         assert response.status_code == 200
         assert 'href="/problems/slow-api/edit"' in response.text
         assert 'href="/problems/slow-api/delete"' in response.text
+
+    def test_problem_detail_shows_management_controls_for_bpalagi(self, bpalagi_client):
+        response = bpalagi_client.get("/problems/slow-api")
+
+        assert response.status_code == 200
+        assert 'href="/problems/slow-api/edit"' in response.text
+        assert 'href="/problems/slow-api/delete"' in response.text
+
+    def test_problem_detail_hides_management_controls_for_non_owner(
+        self, other_authenticated_client
+    ):
+        response = other_authenticated_client.get("/problems/slow-api")
+
+        assert response.status_code == 200
+        assert 'href="/problems/slow-api/edit"' not in response.text
+        assert 'href="/problems/slow-api/delete"' not in response.text
 
     def test_problem_detail_hides_management_controls_for_guests(self, client):
         response = client.get("/problems/slow-api")

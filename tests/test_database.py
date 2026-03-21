@@ -7,6 +7,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from app.database import (
+    MAINTAINER_LOGIN,
     MANAGED_PROBLEM_WALKTHROUGH_TITLE,
     SLOW_API_DETAIL_OVERVIEW,
     SLOW_API_DETAIL_SUMMARY,
@@ -19,6 +20,7 @@ from app.database import (
     ProblemSolutionSubmission,
     User,
     UserRepo,
+    _backfill_problem_ownership,
     _seed_initial_data,
     create_db_engine,
     delete_problem_and_dependencies,
@@ -270,6 +272,95 @@ class TestProblemDetailContent:
             .count()
             == 0
         )
+
+
+class TestProblemOwnership:
+    def test_problem_creator_relationship_persists(self, db_session):
+        user = User(github_id=202601, login="owner-user")
+        db_session.add(user)
+        db_session.commit()
+        db_session.refresh(user)
+
+        problem = Problem(
+            id="owner-problem",
+            title="Owner Problem",
+            description="Ownership test.",
+            detail_summary="Ownership summary.",
+            detail_overview="Ownership overview.",
+            domain_specialization="Ownership",
+            difficulty="Easy",
+            language="Python",
+            template_repo="test/owner-problem-template",
+            is_active=True,
+            creator_user_id=user.id,
+        )
+        db_session.add(problem)
+        db_session.commit()
+
+        saved_problem = (
+            db_session.query(Problem).filter(Problem.id == "owner-problem").one()
+        )
+        assert saved_problem.creator_user_id == user.id
+        assert saved_problem.creator is not None
+        assert saved_problem.creator.login == "owner-user"
+
+    def test_backfill_problem_ownership_assigns_maintainer_when_present(
+        self, db_session
+    ):
+        maintainer = User(github_id=202602, login=MAINTAINER_LOGIN)
+        db_session.add(maintainer)
+        db_session.add(
+            Problem(
+                id="legacy-problem",
+                title="Legacy Problem",
+                description="Legacy row.",
+                detail_summary="Legacy summary.",
+                detail_overview="Legacy overview.",
+                domain_specialization="Legacy",
+                difficulty="Medium",
+                language="Python",
+                template_repo="test/legacy-problem-template",
+                is_active=True,
+            )
+        )
+        db_session.commit()
+
+        _backfill_problem_ownership(db_session)
+        db_session.commit()
+
+        saved_problem = (
+            db_session.query(Problem).filter(Problem.id == "legacy-problem").one()
+        )
+        assert saved_problem.creator_user_id == maintainer.id
+
+    def test_backfill_problem_ownership_skips_cleanly_without_maintainer(
+        self, db_session
+    ):
+        db_session.add(
+            Problem(
+                id="legacy-without-maintainer",
+                title="Legacy Problem",
+                description="Legacy row.",
+                detail_summary="Legacy summary.",
+                detail_overview="Legacy overview.",
+                domain_specialization="Legacy",
+                difficulty="Medium",
+                language="Python",
+                template_repo="test/legacy-problem-template",
+                is_active=True,
+            )
+        )
+        db_session.commit()
+
+        _backfill_problem_ownership(db_session)
+        db_session.commit()
+
+        saved_problem = (
+            db_session.query(Problem)
+            .filter(Problem.id == "legacy-without-maintainer")
+            .one()
+        )
+        assert saved_problem.creator_user_id is None
 
 
 class TestYoutubeNormalization:
